@@ -55,7 +55,12 @@ export class MongoState {
 export class MongoSessionStore {
   constructor(collection,dataPath) {this.collection=collection;this.dataPath=dataPath;}
   async sessionExists({session}) {return !!await this.collection.findOne({_id:`session:${session}`});}
-  async save({session}) {
+  save(options) {
+    if (this.saving) return this.saving;
+    this.saving = this.saveOnce(options).finally(() => { this.saving = null; });
+    return this.saving;
+  }
+  async saveOnce({session}) {
     const version=randomUUID(), file=await open(join(this.dataPath,`${session}.zip`),'r');
     const hash=createHash('sha256');let count=0,size=0;
     try {
@@ -92,4 +97,13 @@ export async function acquireLease(collection,owner,now=new Date()) {
     const result=await collection.findOneAndUpdate({_id:'lock:tennis-results',$or:[{expiresAt:{$lt:now}},{owner}]},{$set:{type:'lock',owner,expiresAt:new Date(now.getTime()+90000)}},{upsert:true,returnDocument:'after'});
     return result?.owner===owner;
   } catch(e) {if(e.code===11000)return false;throw e;}
+}
+
+export function serializeAsync(task) {
+  let pending;
+  return (...args) => {
+    if (pending) return pending;
+    pending=Promise.resolve().then(()=>task(...args)).finally(()=>{pending=null;});
+    return pending;
+  };
 }

@@ -12,6 +12,7 @@ Bot independiente que lee resultados de tenis en un grupo de WhatsApp y consulta
 - Exige una única reserva de ranking activa y pendiente, para los mismos participantes y con una antigüedad máxima de dos días calendario en Chile.
 - Responde primero “📩 Resultado recibido. Validando…”.
 - Si no encuentra una reserva, responde: “⚠️ No se encontró un partido agendado para esos jugadores dentro de los dos días permitidos. Este resultado no será considerado.”
+- En modo de registro real, los mensajes anteriores al arranque no se procesan automáticamente.
 - Solo después de una respuesta exitosa del backend confirma “✅ Resultado ya ingresado”.
 - En modo prueba no envía el POST y avisa que no se modificaron puntos.
 - Ignora reenvíos con los mismos jugadores, marcador y fecha, incluso con cambios de separadores o nombres abreviados. Los duplicados se ignoran sin responder.
@@ -87,7 +88,7 @@ No ejecutar una segunda instancia usando la misma sesión. No refrescar manualme
 
 ## Estado persistente y fallos
 
-La sesión, el diario y los alias se guardan en MongoDB. `RemoteAuth` usa un adaptador propio compatible con su interfaz: guarda manifiesto y fragmentos de sesión en una sola colección, incluso si el archivo supera 16 MB. El directorio `.wwebjs_auth/` se usa como espacio de trabajo de Chrome; la copia remota permite restaurar la sesión al iniciar. El evento `remote_session_saved` confirma un respaldo inicial y luego se respalda cada 60 segundos.
+La sesión, el diario y los alias se guardan en MongoDB. `RemoteAuth` usa un adaptador propio compatible con su interfaz: guarda manifiesto y fragmentos de sesión en una sola colección, incluso si el archivo supera 16 MB. El directorio `.wwebjs_auth/` se usa como espacio de trabajo de Chrome; la copia remota permite restaurar la sesión al iniciar. El evento `remote_session_saved` confirma un respaldo inicial y luego se intenta respaldar cada 60 segundos. La compresión y la subida se serializan: si una copia sigue en curso, no se inicia otra.
 
 Se mantiene un bloqueo renovable dentro de `bot_sessions`: una segunda instancia no puede iniciar con la misma sesión. Si pierde el acceso a MongoDB o el bloqueo, el bot se detiene. La migración del diario local usa inserciones que no sobrescriben estados remotos existentes.
 

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {MongoSessionStore,MongoState,acquireLease} from './mongo-store.mjs';
+import {MongoSessionStore,MongoState,acquireLease,serializeAsync} from './mongo-store.mjs';
 
 const matches=(doc,query)=>Object.entries(query).every(([key,value])=>value && value.$ne!==undefined ? doc[key]!==value.$ne : doc[key]===value);
 function collection() {
@@ -26,12 +26,12 @@ test('guarda y recupera sesiones por fragmentos y detecta datos incompletos', as
     const data=Buffer.alloc(2*1024*1024+37,123);
     await writeFile(join(dir,'test.zip'),data);
     assert.equal(await store.sessionExists({session}),false);
-    await store.save({session});
+    await Promise.all([store.save({session}),store.save({session})]);
     assert.equal(c.docs.filter(d=>d.type==='chunk').length,3);
     assert.equal(await store.sessionExists({session}),true);
     await store.extract({session,path:join(dir,'restored.zip')});
     assert.deepEqual(await readFile(join(dir,'restored.zip')),data);
-    await store.save({session});
+    await Promise.all([store.save({session}),store.save({session})]);
     assert.equal(c.docs.filter(d=>d.type==='chunk').length,3);
     c.docs.find(d=>d.type==='chunk').data=Buffer.from('corrupto');
     await assert.rejects(store.extract({session,path:join(dir,'broken.zip')}),/dañada/);
@@ -56,4 +56,14 @@ test('migra sin sobrescribir estados remotos y recupera alias tras reiniciar',as
 test('no permite otra instancia cuando el bloqueo ya está tomado',async()=>{
   assert.equal(await acquireLease({findOneAndUpdate:async()=>{const e=new Error();e.code=11000;throw e;}},'new'),false);
   assert.equal(await acquireLease({findOneAndUpdate:async()=>({owner:'same'})},'same'),true);
+});
+
+test('no superpone compresión ni subida de respaldos y permite reintentar tras error', async()=>{
+  let calls=0,release;
+  const task=serializeAsync(async()=>{calls++;await new Promise(resolve=>{release=resolve;});});
+  const first=task(),second=task();
+  assert.equal(first,second);await Promise.resolve();assert.equal(calls,1);release();await first;
+  const third=task();await Promise.resolve();assert.equal(calls,2);release();await third;
+  let failures=0;const failing=serializeAsync(async()=>{failures++;throw new Error('falló');});
+  await assert.rejects(failing(),/falló/);await assert.rejects(failing(),/falló/);assert.equal(failures,2);
 });

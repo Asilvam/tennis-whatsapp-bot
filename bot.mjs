@@ -6,12 +6,13 @@ import {randomUUID} from 'node:crypto';
 import {normalize, parse, resultKey} from './parser.mjs';
 import {findReservation, reservationNotice} from './reservation.mjs';
 import {suggestAlias, senderOf, confirmationAnswer} from './aliases.mjs';
-import {connectStorage, MongoState, MongoSessionStore, acquireLease} from './mongo-store.mjs';
+import {connectStorage, MongoState, MongoSessionStore, acquireLease, serializeAsync} from './mongo-store.mjs';
 
 const {Client, RemoteAuth} = WhatsApp;
 const base = process.env.API_BASE_URL?.replace(/\/$/, '');
 if (!base) throw new Error('Falta API_BASE_URL');
 const dry = process.env.DRY_RUN !== 'false';
+const startedAt = Math.floor(Date.now()/1000);
 let groupId = process.env.WHATSAPP_GROUP_ID;
 const groupName = process.env.WHATSAPP_GROUP_NAME;
 const messageDate = message => new Intl.DateTimeFormat('en-CA', {timeZone:'America/Santiago', year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(message.timestamp * 1000));
@@ -46,6 +47,8 @@ async function api(path, body) {
   return response.json();
 }
 const auth=new RemoteAuth({clientId:'tennis-results',store:new MongoSessionStore(storage.sessions,resolve('.wwebjs_auth')),backupSyncIntervalMs:60000});
+// Serializar compresión y subida completas: el intervalo puede vencer antes del respaldo.
+auth.storeRemoteSession=serializeAsync(auth.storeRemoteSession.bind(auth));
 const client = new Client({
   authStrategy:auth,
   puppeteer: {
@@ -148,6 +151,7 @@ async function processMessage(message, resume = false) {
   const chatId = message.fromMe ? message.to : message.from;
   if (!groupId || chatId !== groupId || message.type !== 'chat') return;
   if (message.body.startsWith('[Bot escalerilla]')) return;
+  if (!dry && !resume && message.timestamp < startedAt) return;
   if (!resume && message.hasQuotedMsg && ['si','no'].includes(normalize(message.body))) {
     const quoted = await message.getQuotedMessage();
     for (const [originalId,pending] of Object.entries(journal)) {
