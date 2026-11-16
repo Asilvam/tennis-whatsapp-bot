@@ -1,7 +1,8 @@
 import WhatsApp from 'whatsapp-web.js';
 import qr from 'qrcode-terminal';
 import {mkdir, readFile, writeFile, rename} from 'node:fs/promises';
-import {normalize, parse, resultKey, selectReserve} from './parser.mjs';
+import {normalize, parse, resultKey} from './parser.mjs';
+import {findReservation, reservationNotice} from './reservation.mjs';
 
 const {Client, LocalAuth} = WhatsApp;
 const base = process.env.API_BASE_URL?.replace(/\/$/, '');
@@ -42,6 +43,7 @@ async function acknowledge(message) {
   if (entry.status === 'sent') text = '✅ Resultado ya ingresado.';
   else if (entry.status === 'preview') text = '🧪 Resultado validado con su reserva. Estamos en modo prueba: no se registró ni se modificaron puntos.';
   else if (entry.status === 'uncertain') text = '⚠️ No pude confirmar el registro. Se requiere revisión antes de reintentar para evitar duplicados.';
+  else if (reservationNotice(entry.reasonCode)) text = reservationNotice(entry.reasonCode);
   else if (entry.reason?.includes('encontradas 0')) text = '⚠️ No hay un partido de ranking agendado y pendiente de resultado para esos jugadores en la fecha del mensaje. El resultado no fue ingresado.';
   else text = '⚠️ Resultado recibido, pero pendiente de revisión: no pude validar los jugadores, el marcador o una reserva única. No se confirmó el registro.';
   // Guardar antes del envío: ante una respuesta incierta, evitar avisos duplicados.
@@ -142,8 +144,12 @@ async function processMessage(message) {
     await save();
     if (parseError) throw parseError;
     if (!parsed) return;
-    const reserve = selectReserve(parsed, await api('/court-reserve'), date);
-    if ((await api('/match-ranking')).some(r => r.matchId === reserve.idCourtReserve)) throw new Error('La reserva ya tiene un resultado');
+    const reserve = await findReservation(parsed, date, api);
+    if ((await api('/match-ranking')).some(r => r.matchId === reserve.idCourtReserve)) {
+      const error = new Error('La reserva ya tiene un resultado');
+      error.code = 'ALREADY_RECORDED';
+      throw error;
+    }
     async function player(p) {
       const categories = await api(`/player-category-points/${encodeURIComponent(p.email)}`);
       const active = categories.filter(c => c.isActive && (parsed.winner.length === 2 ? c.category === 'Dobles' : ['1','2','3','4'].includes(c.category)));
@@ -167,7 +173,7 @@ async function processMessage(message) {
     console.log('Registrado', payload.matchId);
     await acknowledge(message);
   } catch (error) {
-    journal[id] = {...journal[id],status:posting ? 'uncertain' : 'pending',reason:error.message};
+    journal[id] = {...journal[id],status:posting ? 'uncertain' : 'pending',reason:error.message,reasonCode:error.code};
     await save();
     console.error('Revisión manual:', id, error.message);
     await acknowledge(message);

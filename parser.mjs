@@ -56,7 +56,21 @@ export function parse(text, roster) {
 
 export function selectReserve(parsed, reserves, date) {
   const names = [...parsed.winner,...parsed.looser].map(p => normalize(p.namePlayer)).sort().join('|');
-  const found = reserves.filter(r => r.state && r.isForRanking && !r.resultMatchUpdated && r.dateToPlay === date && Boolean(r.isDouble) === (parsed.winner.length === 2) && [r.player1,r.player2,r.player3,r.player4].filter(Boolean).map(normalize).sort().join('|') === names);
-  if (found.length !== 1) throw new Error(`Se esperaba una reserva pendiente para ${date}; encontradas ${found.length}`);
+  const fail = (code, message) => { const error = new Error(message); error.code = code; throw error; };
+  if (!Array.isArray(reserves)) fail('INVALID_HISTORY', 'Respuesta de historial inválida');
+  const scheduled = reserves.filter(r => {
+    const players = [r.player1,r.player2,r.player3,r.player4].filter(Boolean);
+    // El endpoint de historial no proyecta isDouble; inferirlo por participantes.
+    const isDouble = typeof r.isDouble === 'boolean' ? r.isDouble : players.length === 4;
+    return r.dateToPlay === date && isDouble === (parsed.winner.length === 2) && players.map(normalize).sort().join('|') === names;
+  });
+  if (!scheduled.length) fail('NO_RESERVATION', `No hay partido agendado para ${date}`);
+  const active = scheduled.filter(r => r.state === true);
+  if (!active.length) fail('INACTIVE_RESERVATION', 'El partido no tiene una reserva activa');
+  const ranking = active.filter(r => r.isForRanking === true);
+  if (!ranking.length) fail('NOT_RANKING', 'El partido no fue creado para ranking');
+  const found = ranking.filter(r => r.resultMatchUpdated === false);
+  if (!found.length) fail('ALREADY_RECORDED', 'El partido ya tiene un resultado registrado');
+  if (found.length !== 1) fail('AMBIGUOUS_RESERVATION', `Hay varias reservas pendientes para ${date}`);
   return found[0];
 }

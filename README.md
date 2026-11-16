@@ -28,9 +28,11 @@ Antes de registrar un resultado, la reserva del backend debe cumplir todas estas
 4. Estar pendiente de resultado (`resultMatchUpdated: false`) y no tener un resultado guardado.
 5. Ser la única reserva que cumple esas condiciones; si hay varias, se requiere revisión.
 
-El filtro por `isForRanking` ya está implementado. **Está pendiente diferenciar el aviso para una reserva existente que no es de ranking.** Actualmente ese caso genera el mismo aviso que la ausencia de una reserva válida.
+La búsqueda consulta `GET /court-reserve/history/:namePlayer`, que incluye partidos cuyo horario ya terminó. No usa el listado general de reservas, que oculta horarios finalizados. El historial actual no incluye `isDouble`; cuando falta, se infiere la modalidad por la cantidad de participantes.
 
-El mensaje previsto para ese caso es:
+El bot distingue reservas inexistentes, inactivas, no creadas para ranking, ya ingresadas y múltiples coincidencias. Un fallo al consultar el backend se informa como pendiente de revisión, no como ausencia de reserva.
+
+Si la reserva existe pero no es de ranking, responde:
 
 > ⚠️ El partido está agendado, pero no fue creado para ranking. El resultado no fue ingresado.
 
