@@ -92,3 +92,11 @@ test('explica el bloqueo y su espera sin afirmar que otro bot está activo',()=>
   assert.match(leaseNotice(new Date(0),1000),/pudo vencer/);
   assert.match(leaseNotice(undefined,1000),/vuelve a intentar/);
 });
+
+test('el bloqueo vence a los 30 segundos',async()=>{
+ const now=new Date('2026-11-16T12:00:00Z');let expiresAt;
+ const collection={findOneAndUpdate:async(filter,update)=>{expiresAt=update.$set.expiresAt;return {owner:'bot'};}};
+ assert.equal(await acquireLease(collection,'bot',now),true);
+ assert.equal(expiresAt.getTime()-now.getTime(),30000);
+ assert.match(leaseNotice(expiresAt,now.getTime()),/30 segundos si no se renueva/);
+});

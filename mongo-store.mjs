@@ -103,7 +103,7 @@ export class MongoSessionStore {
 
 export async function acquireLease(collection,owner,now=new Date()) {
   try {
-    const result=await collection.findOneAndUpdate({_id:'lock:tennis-results',$or:[{expiresAt:{$lt:now}},{owner}]},{$set:{type:'lock',owner,expiresAt:new Date(now.getTime()+90000)}},{upsert:true,returnDocument:'after'});
+    const result=await collection.findOneAndUpdate({_id:'lock:tennis-results',$or:[{expiresAt:{$lt:now}},{owner}]},{$set:{type:'lock',owner,expiresAt:new Date(now.getTime()+30000)}},{upsert:true,returnDocument:'after'});
     return result?.owner===owner;
   } catch(e) {if(e.code===11000)return false;throw e;}
 }

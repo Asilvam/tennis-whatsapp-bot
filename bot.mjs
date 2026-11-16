@@ -66,14 +66,19 @@ let stopping=false;
 async function shutdown(code=0) {
   if(stopping)return;stopping=true;
   clearInterval(heartbeat);
+  const forceExit=setTimeout(()=>{
+    console.error('El cierre tardó más de 8 segundos; se detendrá el proceso. El bloqueo vencerá solo.');
+    try {client.pupBrowser?.process()?.kill('SIGKILL');} catch {}
+    process.exit(code);
+  },8000);
   try {await client.destroy();} catch {}
   try {await storage.sessions.deleteOne({_id:'lock:tennis-results',owner});} catch {}
-  await storage.connection.close();process.exit(code);
+  await storage.connection.close();clearTimeout(forceExit);process.exit(code);
 }
 const heartbeat=setInterval(async()=>{
   try {if(!await acquireLease(storage.sessions,owner)) {console.error('Otra instancia tiene el control; deteniendo bot.');await shutdown(1);}}
   catch {console.error('Se perdió la conexión a MongoDB; deteniendo bot.');await shutdown(1);}
-},30000);
+},10000);
 process.on('SIGTERM',()=>shutdown());
 process.on('SIGINT',()=>shutdown());
 client.on('remote_session_saved',()=>console.log('Sesión de WhatsApp guardada en MongoDB.'));
@@ -154,6 +159,7 @@ client.on('ready', async () => {
 setInterval(() => { if (!groupId) resolveGroup().catch(console.error); }, 20000);
 let queue = Promise.resolve();
 async function processMessage(message, resume = false) {
+  if(stopping)return;
   const chatId = message.fromMe ? message.to : message.from;
   if (!groupId || chatId !== groupId || message.type !== 'chat') return;
   if (message.body.startsWith('[Bot escalerilla]')) return;
