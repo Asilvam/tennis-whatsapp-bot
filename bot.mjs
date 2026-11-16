@@ -6,6 +6,7 @@ import {randomUUID} from 'node:crypto';
 import {normalize, parse, resultKey} from './parser.mjs';
 import {findReservation, reservationNotice} from './reservation.mjs';
 import {suggestAlias, senderOf, confirmationAnswer} from './aliases.mjs';
+import {findDuplicate, confirmedDuplicateNotice} from './duplicates.mjs';
 import {connectStorage, MongoState, MongoSessionStore, acquireLease, serializeAsync, leaseNotice} from './mongo-store.mjs';
 
 const {Client, RemoteAuth} = WhatsApp;
@@ -199,10 +200,16 @@ async function processMessage(message, resume = false) {
     try { roster=await api('/register'); parsed = parse(message.body, roster, aliases[groupId] || {}); }
     catch (error) { parseError = error; }
     const key = parsed ? resultKey(parsed,groupId,date) : undefined;
-    if (key && Object.entries(journal).some(([otherId,entry]) => otherId!==id && entry.resultKey === key)) {
-      journal[id] = {status:'duplicate',resultKey:key};
+    const duplicate=key && findDuplicate(journal,key,id);
+    if (duplicate) {
+      journal[id] = {...journal[id],status:'duplicate',resultKey:key,duplicateOf:duplicate.id};
       await save();
       console.log('Resultado repetido ignorado:', id);
+      if (resume) {
+        journal[id].acknowledgement='sending';await save();
+        await message.reply(confirmedDuplicateNotice(duplicate.entry));
+        journal[id].acknowledgement='sent';await save();
+      }
       return;
     }
     const receipt=journal[id]?.receipt;
