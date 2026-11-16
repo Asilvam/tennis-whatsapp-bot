@@ -34,3 +34,20 @@ test('solo acepta sí/no del autor, citando la pregunta vigente', () => {
   assert.equal(confirmationAnswer(message,{...pending,status:'sent'},'question',100),null);
   assert.equal(confirmationAnswer({...message,body:'tal vez'},pending,'question',100),null);
 });
+
+
+test('propone una inicial con apellido parecido y exige confirmación antes de parsear', () => {
+  const people=[{namePlayer:'Fernando Andrés Villarroel Soto',email:'fernando'},{namePlayer:'Martina Villarroel',email:'martina'},...roster];
+  const suggestion=suggestAlias('F. Villarruel',people);
+  assert.deepEqual(suggestion,{label:'F. Villarruel',name:'Fernando Andrés Villarroel Soto',email:'fernando'});
+  const message='F. Villarruel a Victor Barrera 6/3 6/4';
+  assert.throws(()=>parse(message,people));
+  assert.equal(parse(message,people,{[normalize(suggestion.label)]:suggestion.email}).winner[0].email,'fernando');
+});
+
+test('no decide entre varias coincidencias parecidas ni inventa una inicial', () => {
+  const people=[{namePlayer:'Fernando Villarroel',email:'one'},{namePlayer:'Felipe Villarroel',email:'two'}];
+  assert.equal(suggestAlias('F. Villarruel',people),null);
+  assert.equal(suggestAlias('J. Villarruel',people),null);
+  assert.equal(suggestAlias('F. Perez',people),null);
+});

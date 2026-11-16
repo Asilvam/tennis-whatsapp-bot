@@ -45,7 +45,7 @@ Si no hay reserva válida, no se envía el POST ni se modifican puntos. Antes de
 
 ## Confirmación de apodos en el grupo
 
-Si un nombre no se identifica y hay una única coincidencia por prefijo del nombre y apellido, el bot pregunta antes de usarla. Por ejemplo:
+Si un nombre no se identifica y hay una única coincidencia probable, el bot pregunta antes de usarla. Considera prefijos de apodos e iniciales del nombre, junto con el apellido exacto o con errores pequeños de escritura (hasta una edición en apellidos de 4–6 letras y dos en apellidos de al menos 7 letras). Por ejemplo, “F. Villarruel” puede proponerse como “Fernando Andrés Villarroel Soto”. La similitud solo genera una pregunta: nunca asigna un jugador sin confirmar. Por ejemplo:
 
 > ¿Con “Maxi Galleguillos” te refieres a “Maximiliano Galleguillos”? Quien envió el resultado debe responder “sí” o “no” citando esta pregunta. El resultado queda pendiente; aún no se ha ingresado.
 

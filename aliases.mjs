@@ -1,15 +1,31 @@
 import {normalize, resolveTeam} from './parser.mjs';
 
+// Distancia de edición: solo se usa para proponer, nunca para asignar identidades.
+function editDistance(a,b) {
+  let previous=Array.from({length:b.length+1},(_,i)=>i);
+  for(let i=1;i<=a.length;i++) {
+    const row=[i];
+    for(let j=1;j<=b.length;j++) row[j]=Math.min(row[j-1]+1,previous[j]+1,previous[j-1]+(a[i-1]===b[j-1]?0:1));
+    previous=row;
+  }
+  return previous[b.length];
+}
+function similarSurname(query,value) {
+  if(query===value)return true;
+  if(Math.min(query.length,value.length)<4)return false;
+  return editDistance(query,value)<=(Math.min(query.length,value.length)>=7?2:1);
+}
+
 export function suggestAlias(text, roster, aliases = {}) {
   if (!text) return null;
   const suggestions = [];
   function candidate(label) {
     try { resolveTeam(label,roster,aliases); return; } catch { /* Nombre aún sin identificar. */ }
     const query = normalize(label).split(' ');
-    if (query.length < 2 || query[0].length < 3) return;
+    if (query.length < 2 || (query[0].length !== 1 && query[0].length < 3)) return;
     const found = roster.filter(p => {
       const tokens = normalize(p.namePlayer).split(' ');
-      return tokens[0].startsWith(query[0]) && query.slice(1).every(t => tokens.slice(1).includes(t));
+      return tokens[0].startsWith(query[0]) && query.slice(1).every(t => tokens.slice(1).some(surname=>similarSurname(t,surname)));
     });
     if (found.length === 1) suggestions.push({label:label.trim(),email:found[0].email,name:found[0].namePlayer});
   }
