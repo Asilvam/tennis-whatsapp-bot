@@ -33,6 +33,7 @@ test('guarda y recupera sesiones por fragmentos y detecta datos incompletos', as
     assert.deepEqual(await readFile(join(dir,'restored.zip')),data);
     await Promise.all([store.save({session}),store.save({session})]);
     assert.equal(c.docs.filter(d=>d.type==='chunk').length,3);
+    await rm(join(dir,'test.cache.zip'));
     c.docs.find(d=>d.type==='chunk').data=Buffer.from('corrupto');
     await assert.rejects(store.extract({session,path:join(dir,'broken.zip')}),/dañada/);
     await store.delete({session});
@@ -66,4 +67,18 @@ test('no superpone compresión ni subida de respaldos y permite reintentar tras 
   const third=task();await Promise.resolve();assert.equal(calls,2);release();await third;
   let failures=0;const failing=serializeAsync(async()=>{failures++;throw new Error('falló');});
   await assert.rejects(failing(),/falló/);await assert.rejects(failing(),/falló/);assert.equal(failures,2);
+});
+
+test('usa caché solo si coincide con el respaldo verificado en MongoDB',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'tennis-cache-test-'));
+ try {
+  const c=collection(),store=new MongoSessionStore(c,dir),session='cache';
+  await writeFile(join(dir,'cache.zip'),Buffer.from('session válida'));await store.save({session});
+  const find=c.find;c.find=()=>{throw new Error('no debería descargar fragmentos');};
+  await store.extract({session,path:join(dir,'out.zip')});
+  assert.equal((await readFile(join(dir,'out.zip'))).toString(),'session válida');
+  c.find=find;await writeFile(join(dir,'cache.cache.zip'),'caché dañada');
+  await store.extract({session,path:join(dir,'out.zip')});
+  assert.equal((await readFile(join(dir,'out.zip'))).toString(),'session válida');
+ }finally{await rm(dir,{recursive:true,force:true});}
 });

@@ -88,7 +88,7 @@ No ejecutar una segunda instancia usando la misma sesión. No refrescar manualme
 
 ## Estado persistente y fallos
 
-La sesión, el diario y los alias se guardan en MongoDB. `RemoteAuth` usa un adaptador propio compatible con su interfaz: guarda manifiesto y fragmentos de sesión en una sola colección, incluso si el archivo supera 16 MB. El directorio `.wwebjs_auth/` se usa como espacio de trabajo de Chrome; la copia remota permite restaurar la sesión al iniciar. El evento `remote_session_saved` confirma un respaldo inicial y luego se intenta respaldar cada 60 segundos. La compresión y la subida se serializan: si una copia sigue en curso, no se inicia otra.
+La sesión, el diario y los alias se guardan en MongoDB. `RemoteAuth` usa un adaptador propio compatible con su interfaz: guarda manifiesto y fragmentos de sesión en una sola colección, incluso si el archivo supera 16 MB. El directorio `.wwebjs_auth/` se usa como espacio de trabajo de Chrome; la copia remota permite restaurar la sesión al iniciar. El evento `remote_session_saved` confirma un respaldo inicial y luego se intenta respaldar cada 60 segundos. La compresión y la subida se serializan: si una copia sigue en curso, no se inicia otra. Se conserva una caché local del archivo, usada solo si su tamaño y SHA-256 coinciden con el manifiesto de MongoDB; una caché ausente o inválida se vuelve a descargar.
 
 Se mantiene un bloqueo renovable dentro de `bot_sessions`: una segunda instancia no puede iniciar con la misma sesión. Si pierde el acceso a MongoDB o el bloqueo, el bot se detiene. La migración del diario local usa inserciones que no sobrescriben estados remotos existentes.
 

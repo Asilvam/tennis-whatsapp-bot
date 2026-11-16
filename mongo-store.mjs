@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import {randomUUID, createHash} from 'node:crypto';
-import {open, mkdir} from 'node:fs/promises';
+import {open, mkdir, copyFile} from 'node:fs/promises';
+import {createReadStream} from 'node:fs';
 import {join, dirname} from 'node:path';
 
 export async function connectStorage(uri, dbName='Tennis') {
@@ -74,10 +75,17 @@ export class MongoSessionStore {
     } finally {await file.close();}
     await this.collection.replaceOne({_id:`session:${session}`},{type:'manifest',session,version,count,size,sha256:hash.digest('hex'),updatedAt:new Date()},{upsert:true});
     await this.collection.deleteMany({type:'chunk',session,version:{$ne:version}});
+    await copyFile(join(this.dataPath,`${session}.zip`),join(this.dataPath,`${session}.cache.zip`));
   }
   async extract({session,path}) {
     const manifest=await this.collection.findOne({_id:`session:${session}`});
     if(!manifest) throw new Error('No hay sesión remota');
+    const cache=join(this.dataPath,`${session}.cache.zip`);
+    try {
+      const hash=createHash('sha256');let size=0;
+      for await(const part of createReadStream(cache)) {hash.update(part);size+=part.length;}
+      if(size===manifest.size && hash.digest('hex')===manifest.sha256) {await copyFile(cache,path);return;}
+    } catch { /* Sin caché válida: restaurar desde MongoDB. */ }
     await mkdir(dirname(path),{recursive:true});
     const file=await open(path,'w',0o600);const hash=createHash('sha256');let count=0,size=0;
     try {
@@ -88,6 +96,7 @@ export class MongoSessionStore {
       }
     } finally {await file.close();}
     if(count!==manifest.count || size!==manifest.size || hash.digest('hex')!==manifest.sha256) throw new Error('Sesión remota dañada; no se utilizará');
+    await copyFile(path,cache);
   }
   async delete({session}) {await this.collection.deleteMany({session});}
 }
