@@ -58,12 +58,17 @@ export function selectReserve(parsed, reserves, date) {
   const names = [...parsed.winner,...parsed.looser].map(p => normalize(p.namePlayer)).sort().join('|');
   const fail = (code, message) => { const error = new Error(message); error.code = code; throw error; };
   if (!Array.isArray(reserves)) fail('INVALID_HISTORY', 'Respuesta de historial inválida');
-  const scheduled = reserves.filter(r => {
+  const earliest = new Date(`${date}T12:00:00Z`);
+  earliest.setUTCDate(earliest.getUTCDate() - 2);
+  const minimumDate = earliest.toISOString().slice(0,10);
+  const matching = reserves.filter(r => {
     const players = [r.player1,r.player2,r.player3,r.player4].filter(Boolean);
     // El endpoint de historial no proyecta isDouble; inferirlo por participantes.
     const isDouble = typeof r.isDouble === 'boolean' ? r.isDouble : players.length === 4;
-    return r.dateToPlay === date && isDouble === (parsed.winner.length === 2) && players.map(normalize).sort().join('|') === names;
+    return isDouble === (parsed.winner.length === 2) && players.map(normalize).sort().join('|') === names;
   });
+  const scheduled = matching.filter(r => r.dateToPlay >= minimumDate && r.dateToPlay <= date);
+  if (!scheduled.length && matching.some(r => r.dateToPlay < minimumDate)) fail('TOO_OLD', 'El partido tiene más de dos días de antigüedad');
   if (!scheduled.length) fail('NO_RESERVATION', `No hay partido agendado para ${date}`);
   const active = scheduled.filter(r => r.state === true);
   if (!active.length) fail('INACTIVE_RESERVATION', 'El partido no tiene una reserva activa');

@@ -144,7 +144,8 @@ async function processMessage(message) {
     await save();
     if (parseError) throw parseError;
     if (!parsed) return;
-    const reserve = await findReservation(parsed, date, api);
+    const today = messageDate({timestamp:Date.now()/1000});
+    const reserve = await findReservation(parsed, today, api);
     if ((await api('/match-ranking')).some(r => r.matchId === reserve.idCourtReserve)) {
       const error = new Error('La reserva ya tiene un resultado');
       error.code = 'ALREADY_RECORDED';
