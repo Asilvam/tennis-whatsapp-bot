@@ -9,7 +9,7 @@ export async function findReservation(parsed, date, api) {
 
 export function reservationNotice(code) {
   return {
-    NO_RESERVATION: '⚠️ No hay un partido agendado para esos jugadores entre hoy y los dos días anteriores. El resultado no fue ingresado.',
+    NO_RESERVATION: '⚠️ No se encontró un partido agendado para esos jugadores dentro de los dos días permitidos. Este resultado no será considerado.',
     TOO_OLD: '⚠️ El partido tiene más de dos días de jugado. El resultado no fue ingresado.',
     NOT_RANKING: '⚠️ El partido está agendado, pero no fue creado para ranking. El resultado no fue ingresado.',
     INACTIVE_RESERVATION: '⚠️ El partido no tiene una reserva activa. El resultado no fue ingresado.',

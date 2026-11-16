@@ -11,7 +11,7 @@ Bot independiente que lee resultados de tenis en un grupo de WhatsApp y consulta
 - Lee marcadores como `6-2 6-2`, `6/2 6/2` o `6-4/3-6/10-6`.
 - Exige una única reserva de ranking activa y pendiente, para los mismos participantes y con una antigüedad máxima de dos días calendario en Chile.
 - Responde primero “📩 Resultado recibido. Validando…”.
-- Sin reserva responde que no hay un partido agendado y pendiente de resultado para esos jugadores en esa fecha.
+- Si no encuentra una reserva, responde: “⚠️ No se encontró un partido agendado para esos jugadores dentro de los dos días permitidos. Este resultado no será considerado.”
 - Solo después de una respuesta exitosa del backend confirma “✅ Resultado ya ingresado”.
 - En modo prueba no envía el POST y avisa que no se modificaron puntos.
 - Ignora reenvíos con los mismos jugadores, marcador y fecha, incluso con cambios de separadores o nombres abreviados. Los duplicados se ignoran sin responder.
