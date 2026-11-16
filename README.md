@@ -18,6 +18,24 @@ Bot independiente que lee resultados de tenis en un grupo de WhatsApp y consulta
 
 El cálculo de puntos pertenece al backend. El bot no confirma la aceptación del resultado por parte del rival. La fecha se toma del mensaje: indicar otra fecha en el texto aún requiere revisión manual.
 
+## Validación de la reserva para ranking
+
+Antes de registrar un resultado, la reserva del backend debe cumplir todas estas condiciones:
+
+1. Existir y estar activa (`state: true`).
+2. Haber sido creada para ranking (`isForRanking: true`). Una reserva de cancha común no habilita el registro en la escalerilla.
+3. Corresponder a todos los jugadores, la modalidad singles/dobles y la fecha del mensaje en `America/Santiago`.
+4. Estar pendiente de resultado (`resultMatchUpdated: false`) y no tener un resultado guardado.
+5. Ser la única reserva que cumple esas condiciones; si hay varias, se requiere revisión.
+
+El filtro por `isForRanking` ya está implementado. **Está pendiente diferenciar el aviso para una reserva existente que no es de ranking.** Actualmente ese caso genera el mismo aviso que la ausencia de una reserva válida.
+
+El mensaje previsto para ese caso es:
+
+> ⚠️ El partido está agendado, pero no fue creado para ranking. El resultado no fue ingresado.
+
+Si no hay reserva válida, no se envía el POST ni se modifican puntos. Antes de producción, estas validaciones también deben ejecutarse en el backend para que no dependan únicamente del bot.
+
 ## Ejecución local
 
 Requisitos: Node.js 22, acceso al backend y Chrome compatible con Puppeteer.
@@ -57,12 +75,25 @@ Los estados `uncertain` requieren revisar reserva, resultado y puntos antes de r
 
 El endpoint actual del backend aplica puntos y guarda resultados sin una transacción compartida. La protección local contra duplicados no cubre escrituras concurrentes desde el frontend u otro proceso. La idempotencia y la atomicidad deben implementarse también en el backend antes de activar producción.
 
+## Persistencia prevista en MongoDB
+
+**Propuesta pendiente de implementación:** usar una base separada `tennis_whatsapp_bot` en el mismo clúster, con un usuario limitado a esa base. La versión actual sigue usando archivos locales.
+
+| Datos | Almacenamiento propuesto |
+| --- | --- |
+| Sesión de WhatsApp | `RemoteAuth` y `MongoStore`, que administra los archivos de sesión en MongoDB. |
+| Resultados recibidos | Colección `received_results` con ID del mensaje y grupo, jugadores, marcador, fecha, reserva asociada y clave de duplicado. |
+| Procesamiento y avisos | Campos del resultado para recibido, pendiente, ingresado o error y el estado de cada respuesta al grupo. |
+| Control de instancia | Colección `instance_locks` con una concesión renovable para evitar dos bots activos sobre la misma sesión. |
+
+Los identificadores únicos del mensaje y del resultado normalizado deben conservar la detección de repetidos después de reinicios. Las reservas, el cálculo de puntos y la escalerilla permanecen en el backend y se consultan mediante sus endpoints. No se dará al bot acceso directo para modificar esos datos.
+
 ## Heroku
 
 Heroku puede ejecutar este bot como un proceso `worker` independiente. Antes de desplegar hay que:
 
-1. Cambiar LocalAuth por una estrategia de sesión remota compatible con whatsapp-web.js y almacenamiento externo privado.
-2. Mover el diario y la deduplicación fuera del disco temporal del dyno.
+1. Cambiar LocalAuth por RemoteAuth con MongoStore y configurar el acceso privado a MongoDB.
+2. Mover el diario, la deduplicación y el control de instancia a MongoDB, fuera del disco temporal del dyno.
 3. Preparar una imagen Linux con Node y Chrome para ejecución sin ventana y revisar las dependencias.
 4. Implementar credenciales restringidas, validación e idempotencia en el backend.
 5. Configurar URL HTTPS del backend, secretos y grupo permitido en Heroku Config Vars.
