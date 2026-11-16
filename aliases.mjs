@@ -1,4 +1,4 @@
-import {normalize, resolveTeam} from './parser.mjs';
+import {normalize, resolveTeam, activePlayers} from './parser.mjs';
 
 // Distancia de edición: solo se usa para proponer, nunca para asignar identidades.
 function editDistance(a,b) {
@@ -18,6 +18,7 @@ function similarSurname(query,value) {
 
 export function suggestAlias(text, roster, aliases = {}) {
   if (!text) return null;
+  roster=activePlayers(roster);
   const suggestions = [];
   function candidate(label) {
     try { resolveTeam(label,roster,aliases); return; } catch { /* Nombre aún sin identificar. */ }

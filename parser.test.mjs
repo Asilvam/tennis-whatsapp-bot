@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {parse, selectReserve} from './parser.mjs';
-const roster = ['Vicente Pachi','Vicente Illesca','Kevin Gago','Luis Oyarzun','Jaime Marambio','Ignacio Lizana','Felipe Leiva','Juan Caballero','Matias Galleguillos','Maximiliano Galleguillos','Alejandro Silva','Andres Kafati'].map((namePlayer,i) => ({namePlayer,email:String(i)}));
+const roster = ['Vicente Pachi','Vicente Illesca','Kevin Gago','Luis Oyarzun','Jaime Marambio','Ignacio Lizana','Felipe Leiva','Juan Caballero','Matias Galleguillos','Maximiliano Galleguillos','Alejandro Silva','Andres Kafati'].map((namePlayer,i) => ({statePlayer:true,namePlayer,email:String(i)}));
 const messages = [
  'V pachi V illesca a K gago L oyarzun 6-2 , 3-6 , 6-4 🫶',
  'J Marambio a I Lizana 6-4/3-6/10-6 buen partido Jaimito pa la prox 3 normales🦾',
@@ -13,7 +13,7 @@ test('interpreta los cuatro formatos con un padrón ficticio', () => {
   assert.equal(parse(messages[1],roster).result,'6:4, 3:6, 10:6');
 });
 test('rechaza nombres ambiguos y marcadores inválidos', () => {
-  assert.throws(() => parse(messages[2],[...roster,{namePlayer:'Francisco Leiva',email:'otro'}]));
+  assert.throws(() => parse(messages[2],[...roster,{statePlayer:true,namePlayer:'Francisco Leiva',email:'otro'}]));
   for (const score of ['6-2 2-6','6-2 6-2 6-2','6-2 9-1','2-6 2-6']) assert.throws(() => parse(`F Leiva a J Caballero ${score}`,roster));
   assert.equal(parse('buen partido',roster),null);
 });
@@ -27,7 +27,7 @@ test('exige reserva única, del mismo día, pendiente y de ranking', () => {
 });
 
 test('acepta barras dentro de cada set', () => {
-  const parsed = parse('Luis Enrique Lavín a Alejandro Silva 7/6 6/7 7/6', [{namePlayer:'Luis Enrique Lavín',email:'luis'},{namePlayer:'Alejandro Silva',email:'alejandro'}]);
+  const parsed = parse('Luis Enrique Lavín a Alejandro Silva 7/6 6/7 7/6', [{statePlayer:true,namePlayer:'Luis Enrique Lavín',email:'luis'},{statePlayer:true,namePlayer:'Alejandro Silva',email:'alejandro'}]);
   assert.equal(parsed.result,'7:6, 6:7, 7:6');
 });
 
@@ -40,4 +40,18 @@ test('detecta repetidos con iniciales, nombres completos y separadores distintos
   const doubles = parse(messages[0],roster);
   const reordered = {...doubles,winner:[...doubles.winner].reverse()};
   assert.equal(resultKey(doubles,'grupo','hoy'),resultKey(reordered,'grupo','hoy'));
+});
+
+
+test('ignora cuentas inactivas en nombres, iniciales y alias guardados',()=>{
+ const players=[
+  {namePlayer:'Joaquín Gallardo Castillo',email:'active',statePlayer:true},
+  {namePlayer:'Joaquín Gallardo',email:'inactive',statePlayer:false},
+  {namePlayer:'Ricardo Gallardo',email:'winner',statePlayer:true},
+ ];
+ const result=parse('Ricardo Gallardo a Joaquín Gallardo 6/3 6/4',players);
+ assert.equal(result.looser[0].email,'active');
+ const stale=parse('Ricardo Gallardo a J. Gallardo 6/3 6/4',players,{'j gallardo':'inactive'});
+ assert.equal(stale.looser[0].email,'active');
+ assert.throws(()=>parse('Ricardo Gallardo a Joaquín Gallardo 6/3 6/4',players.filter(p=>p.email!=='active')));
 });

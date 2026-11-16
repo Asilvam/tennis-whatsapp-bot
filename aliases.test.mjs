@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {parse,normalize} from './parser.mjs';
 import {suggestAlias,confirmationAnswer} from './aliases.mjs';
 
-const roster=[['Victor Barrera','a'],['Maximiliano Galleguillos','b'],['Aldo Morel','c'],['Luis Galleguillos','d']].map(([namePlayer,email])=>({namePlayer,email}));
+const roster=[['Victor Barrera','a'],['Maximiliano Galleguillos','b'],['Aldo Morel','c'],['Luis Galleguillos','d']].map(([namePlayer,email])=>({statePlayer:true,namePlayer,email}));
 const text='Victor Barrera Maxi Galleguillos a Aldo Morel Luis Galleguillos 6/3 7/5';
 
 test('propone un apodo único en dobles sin aceptarlo automáticamente', () => {
@@ -18,7 +18,7 @@ test('propone un apodo único en dobles sin aceptarlo automáticamente', () => {
 });
 
 test('no propone identidades ambiguas, desconocidas ni apodos de una letra', () => {
-  assert.equal(suggestAlias('Maxi Galleguillos',[...roster,{namePlayer:'Maximo Galleguillos',email:'e'}]),null);
+  assert.equal(suggestAlias('Maxi Galleguillos',[...roster,{statePlayer:true,namePlayer:'Maximo Galleguillos',email:'e'}]),null);
   assert.equal(suggestAlias('Pepe Desconocido',roster),null);
   assert.equal(suggestAlias('X Galleguillos',roster),null);
 });
@@ -37,7 +37,7 @@ test('solo acepta sí/no del autor, citando la pregunta vigente', () => {
 
 
 test('propone una inicial con apellido parecido y exige confirmación antes de parsear', () => {
-  const people=[{namePlayer:'Fernando Andrés Villarroel Soto',email:'fernando'},{namePlayer:'Martina Villarroel',email:'martina'},...roster];
+  const people=[{statePlayer:true,namePlayer:'Fernando Andrés Villarroel Soto',email:'fernando'},{statePlayer:true,namePlayer:'Martina Villarroel',email:'martina'},...roster];
   const suggestion=suggestAlias('F. Villarruel',people);
   assert.deepEqual(suggestion,{label:'F. Villarruel',name:'Fernando Andrés Villarroel Soto',email:'fernando'});
   const message='F. Villarruel a Victor Barrera 6/3 6/4';
@@ -46,8 +46,19 @@ test('propone una inicial con apellido parecido y exige confirmación antes de p
 });
 
 test('no decide entre varias coincidencias parecidas ni inventa una inicial', () => {
-  const people=[{namePlayer:'Fernando Villarroel',email:'one'},{namePlayer:'Felipe Villarroel',email:'two'}];
+  const people=[{statePlayer:true,namePlayer:'Fernando Villarroel',email:'one'},{statePlayer:true,namePlayer:'Felipe Villarroel',email:'two'}];
   assert.equal(suggestAlias('F. Villarruel',people),null);
   assert.equal(suggestAlias('J. Villarruel',people),null);
   assert.equal(suggestAlias('F. Perez',people),null);
+});
+
+
+test('sugiere solo jugadores activos y excluye también los de estado desconocido',()=>{
+ const players=[
+  {namePlayer:'Fernando Villarroel',email:'active',statePlayer:true},
+  {namePlayer:'Felipe Villarroel',email:'inactive',statePlayer:false},
+  {namePlayer:'Francisco Villarroel',email:'unknown'},
+ ];
+ assert.equal(suggestAlias('F Villarruel',players).email,'active');
+ assert.equal(suggestAlias('F Villarruel',players.filter(p=>p.email!=='active')),null);
 });

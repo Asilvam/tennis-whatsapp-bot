@@ -1,5 +1,7 @@
 export const normalize = value => value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
 
+export const activePlayers = roster => roster.filter(player => player.statePlayer === true);
+
 export function resultKey(parsed, groupId, date) {
   const team = players => players.map(p => p.email.toLowerCase()).sort();
   return JSON.stringify([groupId,date,team(parsed.winner),team(parsed.looser),parsed.result]);
@@ -16,6 +18,9 @@ function matches(label, player, aliases = {}) {
 }
 
 export function resolveTeam(text, roster, aliases = {}) {
+  roster=activePlayers(roster);
+  const emails=new Set(roster.map(player=>player.email));
+  aliases=Object.fromEntries(Object.entries(aliases).filter(([,email])=>emails.has(email)));
   const words = text.trim().split(/\s+/);
   const choices = [];
   const singles = roster.filter(p => matches(text, p, aliases));

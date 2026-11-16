@@ -3,7 +3,7 @@ import qr from 'qrcode-terminal';
 import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {randomUUID} from 'node:crypto';
-import {normalize, parse, resultKey} from './parser.mjs';
+import {normalize, parse, resultKey, activePlayers} from './parser.mjs';
 import {findReservation, reservationNotice} from './reservation.mjs';
 import {suggestAlias, senderOf, confirmationAnswer} from './aliases.mjs';
 import {findDuplicate, duplicateNotice} from './duplicates.mjs';
@@ -130,7 +130,7 @@ client.on('ready', async () => {
   if (groupId) {
     const missing = Object.entries(journal).filter(([,entry]) => !entry.resultKey);
     if (missing.length) {
-      const roster = await api('/register');
+      const roster = activePlayers(await api('/register'));
       for (const [id, entry] of missing) {
         try {
           const message = await client.getMessageById(id);
@@ -176,9 +176,9 @@ async function processMessage(message, resume = false) {
         await message.reply('[Bot escalerilla] No usaré ese nombre. Reenvía el resultado con el nombre completo correcto.');
         return;
       }
-      const roster=await api('/register');
+      const roster=activePlayers(await api('/register'));
       if (!roster.some(p=>p.email===pending.suggestion.email)) {
-        await message.reply('[Bot escalerilla] El jugador ya no aparece en el padrón. El resultado sigue pendiente de revisión.');
+        await message.reply('[Bot escalerilla] El jugador ya no está activo en el padrón. El resultado sigue pendiente de revisión.');
         return;
       }
       aliases[groupId] ||= {};
@@ -203,7 +203,7 @@ async function processMessage(message, resume = false) {
     if (!/\s+a\s+/.test(message.body)) return;
     const date = messageDate(message);
     let parsed, parseError, roster;
-    try { roster=await api('/register'); parsed = parse(message.body, roster, aliases[groupId] || {}); }
+    try { roster=activePlayers(await api('/register')); parsed = parse(message.body, roster, aliases[groupId] || {}); }
     catch (error) { parseError = error; }
     const key = parsed ? resultKey(parsed,groupId,date) : undefined;
     const duplicate=key && findDuplicate(journal,key,id);

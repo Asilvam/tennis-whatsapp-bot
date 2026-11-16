@@ -7,7 +7,8 @@ Bot independiente que lee resultados de tenis en un grupo de WhatsApp y consulta
 ## Comportamiento
 
 - Interpreta singles y dobles con la convención `ganador(es) a perdedor(es) marcador`.
-- Acepta iniciales y nombres completos cuando identifican a un único jugador del padrón.
+- Identifica jugadores y propone alias únicamente entre cuentas activas (`statePlayer: true`). Excluye inactivas y registros sin estado activo explícito; los alias guardados hacia cuentas inactivas no intervienen en la comparación.
+- Acepta iniciales y nombres completos cuando identifican a un único jugador activo del padrón.
 - Lee marcadores como `6-2 6-2`, `6/2 6/2` o `6-4/3-6/10-6`.
 - Exige una única reserva de ranking activa y pendiente, para los mismos participantes y con una antigüedad máxima de dos días calendario en Chile.
 - Responde primero “📩 Resultado recibido. Validando…”.
