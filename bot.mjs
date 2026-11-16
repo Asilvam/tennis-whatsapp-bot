@@ -3,6 +3,7 @@ import qr from 'qrcode-terminal';
 import {mkdir, readFile, writeFile, rename} from 'node:fs/promises';
 import {normalize, parse, resultKey} from './parser.mjs';
 import {findReservation, reservationNotice} from './reservation.mjs';
+import {suggestAlias, senderOf, confirmationAnswer} from './aliases.mjs';
 
 const {Client, LocalAuth} = WhatsApp;
 const base = process.env.API_BASE_URL?.replace(/\/$/, '');
@@ -15,6 +16,13 @@ await mkdir('state', {recursive:true});
 let journal;
 try { journal = JSON.parse(await readFile('state/messages.json', 'utf8')); }
 catch (e) { if (e.code !== 'ENOENT') throw e; journal = {}; }
+let aliases;
+try { aliases = JSON.parse(await readFile('state/aliases.json','utf8')); }
+catch (e) { if (e.code !== 'ENOENT') throw e; aliases = {}; }
+async function saveAliases() {
+  await writeFile('state/aliases.tmp',JSON.stringify(aliases,null,2),{mode:0o600});
+  await rename('state/aliases.tmp','state/aliases.json');
+}
 async function save() {
   await writeFile('state/messages.tmp', JSON.stringify(journal, null, 2), {mode:0o600});
   await rename('state/messages.tmp', 'state/messages.json');
@@ -88,7 +96,7 @@ client.on('ready', async () => {
         try {
           const message = await client.getMessageById(id);
           if (!message || (message.fromMe ? message.to : message.from) !== groupId) continue;
-          const parsed = parse(message.body, roster);
+          const parsed = parse(message.body, roster, aliases[groupId] || {});
           const date = Number.isFinite(message.timestamp) ? messageDate(message) : entry.reason?.match(/\d{4}-\d{2}-\d{2}/)?.[0];
           if (parsed && date) entry.resultKey = resultKey(parsed, groupId, date);
         } catch (error) { console.error('No se pudo indexar un resultado anterior:', error.message); }
@@ -111,29 +119,62 @@ client.on('ready', async () => {
 });
 setInterval(() => { if (!groupId) resolveGroup().catch(console.error); }, 20000);
 let queue = Promise.resolve();
-async function processMessage(message) {
+async function processMessage(message, resume = false) {
   const chatId = message.fromMe ? message.to : message.from;
   if (!groupId || chatId !== groupId || message.type !== 'chat') return;
   if (message.body.startsWith('[Bot escalerilla]')) return;
+  if (!resume && message.hasQuotedMsg && ['si','no'].includes(normalize(message.body))) {
+    const quoted = await message.getQuotedMessage();
+    for (const [originalId,pending] of Object.entries(journal)) {
+      if (pending.groupId !== groupId) continue;
+      const answer=confirmationAnswer(message,pending,quoted.id._serialized);
+      if (answer===null) continue;
+      if (!answer) {
+        pending.status='alias_rejected';
+        await save();
+        await message.reply('[Bot escalerilla] No usaré ese nombre. Reenvía el resultado con el nombre completo correcto.');
+        return;
+      }
+      const roster=await api('/register');
+      if (!roster.some(p=>p.email===pending.suggestion.email)) {
+        await message.reply('[Bot escalerilla] El jugador ya no aparece en el padrón. El resultado sigue pendiente de revisión.');
+        return;
+      }
+      aliases[groupId] ||= {};
+      aliases[groupId][normalize(pending.suggestion.label)] = pending.suggestion.email;
+      await saveAliases();
+      pending.status='alias_confirmed';
+      await save();
+      const original=await client.getMessageById(originalId);
+      if (!original) return;
+      original.body=pending.originalBody;
+      original.timestamp=pending.originalTimestamp;
+      await processMessage(original,true);
+      return;
+    }
+    return;
+  }
   const id = message.id._serialized;
-  if (journal[id]) return;
+  if (journal[id] && !resume) return;
   let posting = false;
   try {
     if (!/\d+\s*[-:/]\s*\d+/.test(message.body)) return;
     if (!/\s+a\s+/.test(message.body)) return;
     const date = messageDate(message);
-    let parsed, parseError;
-    try { parsed = parse(message.body, await api('/register')); }
+    let parsed, parseError, roster;
+    try { roster=await api('/register'); parsed = parse(message.body, roster, aliases[groupId] || {}); }
     catch (error) { parseError = error; }
     const key = parsed ? resultKey(parsed,groupId,date) : undefined;
-    if (key && Object.values(journal).some(entry => entry.resultKey === key)) {
+    if (key && Object.entries(journal).some(([otherId,entry]) => otherId!==id && entry.resultKey === key)) {
       journal[id] = {status:'duplicate',resultKey:key};
       await save();
       console.log('Resultado repetido ignorado:', id);
       return;
     }
-    journal[id] = {status:'received',receipt:'sending',resultKey:key};
+    const receipt=journal[id]?.receipt;
+    journal[id] = {status:'received',receipt:receipt || 'sending',resultKey:key};
     await save();
+    if (!receipt) {
     try {
       await message.reply('[Bot escalerilla] 📩 Resultado recibido. Validando…');
       journal[id].receipt = 'sent';
@@ -142,6 +183,16 @@ async function processMessage(message) {
       console.error('No se pudo confirmar el envío del recibido:', error.message);
     }
     await save();
+    }
+    const suggestion=parseError && suggestAlias(parseError.teamText,roster || [],aliases[groupId] || {});
+    if (suggestion) {
+      journal[id]={...journal[id],status:'needs_confirmation',groupId,sender:senderOf(message),suggestion,originalBody:message.body,originalTimestamp:message.timestamp,expiresAt:Date.now()+24*60*60*1000};
+      await save();
+      const question=await message.reply(`[Bot escalerilla] ¿Con “${suggestion.label}” te refieres a “${suggestion.name}”? Quien envió el resultado debe responder “sí” o “no” citando esta pregunta. El resultado queda pendiente; aún no se ha ingresado.`);
+      journal[id].questionId=question.id._serialized;
+      await save();
+      return;
+    }
     if (parseError) throw parseError;
     if (!parsed) return;
     const today = messageDate({timestamp:Date.now()/1000});

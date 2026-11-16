@@ -42,6 +42,16 @@ En singles, el jugador antes de “a” es el ganador y el siguiente es el perde
 
 Si no hay reserva válida, no se envía el POST ni se modifican puntos. Antes de producción, estas validaciones también deben ejecutarse en el backend para que no dependan únicamente del bot.
 
+## Confirmación de apodos en el grupo
+
+Si un nombre no se identifica y hay una única coincidencia por prefijo del nombre y apellido, el bot pregunta antes de usarla. Por ejemplo:
+
+> ¿Con “Maxi Galleguillos” te refieres a “Maximiliano Galleguillos”? Quien envió el resultado debe responder “sí” o “no” citando esta pregunta. El resultado queda pendiente; aún no se ha ingresado.
+
+Solo se acepta la respuesta del autor del resultado, citando la pregunta correspondiente, dentro de 24 horas. Un “sí” guarda el alias para ese grupo en `state/aliases.json` y reanuda la validación del mensaje original. Un “no” descarta la propuesta y pide reenviar el resultado con el nombre correcto. No se elige automáticamente entre varios candidatos y no se guardan alias sin confirmación.
+
+Los alias y las consultas pendientes se conservan tras reinicios locales. En la adaptación a MongoDB también habrá que persistir esos datos. Confirmar el nombre no registra el resultado: siguen siendo obligatorias una reserva válida de ranking, la antigüedad máxima de dos días y las comprobaciones de duplicados. No se vuelven a preguntar automáticamente nombres de mensajes históricos al iniciar el bot.
+
 ## Ejecución local
 
 Requisitos: Node.js 22, acceso al backend y Chrome compatible con Puppeteer.

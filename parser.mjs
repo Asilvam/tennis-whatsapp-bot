@@ -5,7 +5,9 @@ export function resultKey(parsed, groupId, date) {
   return JSON.stringify([groupId,date,team(parsed.winner),team(parsed.looser),parsed.result]);
 }
 
-function matches(label, player) {
+function matches(label, player, aliases = {}) {
+  const alias = aliases[normalize(label)];
+  if (alias) return alias === player.email;
   const tokens = normalize(player.namePlayer).split(' ');
   const query = normalize(label).split(' ');
   if (query.length < 2) return false;
@@ -13,24 +15,28 @@ function matches(label, player) {
     ? query.slice(1).every((t, i) => tokens.indexOf(t, i + 1) >= 0) : false;
 }
 
-function team(text, roster) {
+export function resolveTeam(text, roster, aliases = {}) {
   const words = text.trim().split(/\s+/);
   const choices = [];
-  const singles = roster.filter(p => matches(text, p));
+  const singles = roster.filter(p => matches(text, p, aliases));
   for (const p of singles) choices.push([p]);
   for (let i = 2; i <= words.length - 2; i++) {
-    for (const a of roster.filter(p => matches(words.slice(0, i).join(' '), p))) {
-      for (const b of roster.filter(p => matches(words.slice(i).join(' '), p))) {
+    for (const a of roster.filter(p => matches(words.slice(0, i).join(' '), p, aliases))) {
+      for (const b of roster.filter(p => matches(words.slice(i).join(' '), p, aliases))) {
         if (a.email !== b.email) choices.push([a, b]);
       }
     }
   }
   const unique = [...new Map(choices.map(c => [c.map(p => p.email).sort().join('|'), c])).values()];
-  if (unique.length !== 1) throw new Error(`Nombre ambiguo o desconocido: ${text}`);
+  if (unique.length !== 1) {
+    const error = new Error(`Nombre ambiguo o desconocido: ${text}`);
+    error.teamText = text;
+    throw error;
+  }
   return unique[0];
 }
 
-export function parse(text, roster) {
+export function parse(text, roster, aliases = {}) {
   const first = /\d+\s*[-:/]\s*\d+/.exec(text);
   if (!first) return null;
   const sides = text.slice(0, first.index).trim().split(/\s+a\s+/);
@@ -49,7 +55,7 @@ export function parse(text, roster) {
     if (a > b) wins++; else losses++;
   });
   if (wins !== 2) throw new Error('El marcador no corresponde a los ganadores indicados');
-  const winner = team(sides[0], roster), looser = team(sides[1], roster);
+  const winner = resolveTeam(sides[0], roster, aliases), looser = resolveTeam(sides[1], roster, aliases);
   if (winner.length !== looser.length || new Set([...winner,...looser].map(p => p.email)).size !== winner.length * 2) throw new Error('Equipos inválidos');
   return {winner, looser, result: sets.map(s => s.join(':')).join(', ')};
 }
