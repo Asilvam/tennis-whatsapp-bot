@@ -8,6 +8,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      # El parser usa solo Node; las pruebas no requieren sesión, Chrome ni red.
+      - run: npm ci
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "true"
+      # Las pruebas usan almacenamiento simulado; no requieren credenciales ni Chrome.
       - run: npm test
       - run: npm run check

@@ -5,11 +5,13 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env bot.mjs",
     "test": "node --test",
-    "check": "node --check bot.mjs && node --check parser.mjs"
+    "check": "node --check bot.mjs && node --check parser.mjs && node --check mongo-store.mjs && node --check migrate-local.mjs",
+    "migrate:local": "node --env-file-if-exists=.env migrate-local.mjs"
   },
   "dependencies": {
-    "whatsapp-web.js": "^1.34.0",
-    "qrcode-terminal": "^0.12.0"
+    "mongoose": "^8.24.9",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.34.0"
   },
   "description": "Bot de resultados de tenis para WhatsApp y Tennis App",
   "engines": {

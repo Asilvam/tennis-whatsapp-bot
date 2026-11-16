@@ -1,11 +1,14 @@
 import WhatsApp from 'whatsapp-web.js';
 import qr from 'qrcode-terminal';
-import {mkdir, readFile, writeFile, rename} from 'node:fs/promises';
+import {mkdir, readFile, writeFile} from 'node:fs/promises';
+import {resolve} from 'node:path';
+import {randomUUID} from 'node:crypto';
 import {normalize, parse, resultKey} from './parser.mjs';
 import {findReservation, reservationNotice} from './reservation.mjs';
 import {suggestAlias, senderOf, confirmationAnswer} from './aliases.mjs';
+import {connectStorage, MongoState, MongoSessionStore, acquireLease} from './mongo-store.mjs';
 
-const {Client, LocalAuth} = WhatsApp;
+const {Client, RemoteAuth} = WhatsApp;
 const base = process.env.API_BASE_URL?.replace(/\/$/, '');
 if (!base) throw new Error('Falta API_BASE_URL');
 const dry = process.env.DRY_RUN !== 'false';
@@ -13,19 +16,25 @@ let groupId = process.env.WHATSAPP_GROUP_ID;
 const groupName = process.env.WHATSAPP_GROUP_NAME;
 const messageDate = message => new Intl.DateTimeFormat('en-CA', {timeZone:'America/Santiago', year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(message.timestamp * 1000));
 await mkdir('state', {recursive:true});
+let storage;
+try {storage=await connectStorage(process.env.MONGODB_URI,process.env.MONGODB_DATABASE || 'Tennis');}
+catch(error) {console.error('No se pudo conectar MongoDB:',error.name,'código:',error.code || 'sin código');process.exit(1);}
+const owner=randomUUID();
+if(!await acquireLease(storage.sessions,owner)) {await storage.connection.close();throw new Error('Otra instancia del bot ya está activa');}
+const state=new MongoState(storage);
 let journal;
 try { journal = JSON.parse(await readFile('state/messages.json', 'utf8')); }
 catch (e) { if (e.code !== 'ENOENT') throw e; journal = {}; }
 let aliases;
 try { aliases = JSON.parse(await readFile('state/aliases.json','utf8')); }
 catch (e) { if (e.code !== 'ENOENT') throw e; aliases = {}; }
+({journal,aliases}=await state.load(journal,aliases));
+console.log(`Persistencia MongoDB activa: ${storage.connection.name}; ${Object.keys(journal).length} mensajes recuperados.`);
 async function saveAliases() {
-  await writeFile('state/aliases.tmp',JSON.stringify(aliases,null,2),{mode:0o600});
-  await rename('state/aliases.tmp','state/aliases.json');
+  await state.saveAliases(aliases);
 }
 async function save() {
-  await writeFile('state/messages.tmp', JSON.stringify(journal, null, 2), {mode:0o600});
-  await rename('state/messages.tmp', 'state/messages.json');
+  await state.save(journal);
 }
 async function api(path, body) {
   const response = await fetch(base + path, {
@@ -36,13 +45,29 @@ async function api(path, body) {
   if (!response.ok) throw new Error(`API ${path}: HTTP ${response.status}`);
   return response.json();
 }
+const auth=new RemoteAuth({clientId:'tennis-results',store:new MongoSessionStore(storage.sessions,resolve('.wwebjs_auth')),backupSyncIntervalMs:60000});
 const client = new Client({
-  authStrategy:new LocalAuth({clientId:'tennis-results'}),
+  authStrategy:auth,
   puppeteer: {
     headless: process.env.WHATSAPP_HEADLESS !== 'false',
     ...(process.env.CHROME_PATH ? {executablePath:process.env.CHROME_PATH} : {}),
   },
 });
+let stopping=false;
+async function shutdown(code=0) {
+  if(stopping)return;stopping=true;
+  clearInterval(heartbeat);
+  try {await client.destroy();} catch {}
+  try {await storage.sessions.deleteOne({_id:'lock:tennis-results',owner});} catch {}
+  await storage.connection.close();process.exit(code);
+}
+const heartbeat=setInterval(async()=>{
+  try {if(!await acquireLease(storage.sessions,owner)) {console.error('Otra instancia tiene el control; deteniendo bot.');await shutdown(1);}}
+  catch {console.error('Se perdió la conexión a MongoDB; deteniendo bot.');await shutdown(1);}
+},30000);
+process.on('SIGTERM',()=>shutdown());
+process.on('SIGINT',()=>shutdown());
+client.on('remote_session_saved',()=>console.log('Sesión de WhatsApp guardada en MongoDB.'));
 client.on('qr', value => qr.generate(value, {small:true}));
 async function acknowledge(message) {
   const entry = journal[message.id._serialized];
@@ -172,7 +197,10 @@ async function processMessage(message, resume = false) {
       return;
     }
     const receipt=journal[id]?.receipt;
-    journal[id] = {status:'received',receipt:receipt || 'sending',resultKey:key};
+    journal[id] = {
+      status:'received',receipt:receipt || 'sending',resultKey:key,groupId,messageDate:date,
+      ...(parsed ? {winner:parsed.winner.map(p=>p.email),looser:parsed.looser.map(p=>p.email),result:parsed.result} : {}),
+    };
     await save();
     if (!receipt) {
     try {
@@ -197,6 +225,8 @@ async function processMessage(message, resume = false) {
     if (!parsed) return;
     const today = messageDate({timestamp:Date.now()/1000});
     const reserve = await findReservation(parsed, today, api);
+    journal[id].matchId=reserve.idCourtReserve;
+    journal[id].playedDate=reserve.dateToPlay;
     if ((await api('/match-ranking')).some(r => r.matchId === reserve.idCourtReserve)) {
       const error = new Error('La reserva ya tiene un resultado');
       error.code = 'ALREADY_RECORDED';
