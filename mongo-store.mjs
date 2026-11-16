@@ -116,3 +116,17 @@ export function serializeAsync(task) {
     return pending;
   };
 }
+
+export function leaseNotice(expiresAt,now=Date.now()) {
+  const seconds=Math.max(0,Math.ceil((new Date(expiresAt).getTime()-now)/1000));
+  const timing=Number.isFinite(seconds) && seconds>0
+    ? `El bloqueo vence en aproximadamente ${seconds} segundos si no se renueva.`
+    : 'El bloqueo pudo vencer mientras se comprobaba; vuelve a intentar.';
+  return [
+    'No se inició el bot: hay un bloqueo temporal de ejecución en MongoDB.',
+    'Puede pertenecer a otro bot en ejecución o a una instancia anterior que no terminó de cerrar.',
+    timing,
+    'Si continúa apareciendo, comprueba si hay otro bot abierto y ciérralo con Ctrl+C antes de ejecutar npm start nuevamente.',
+    'No necesitas desvincular WhatsApp ni escanear otro QR.',
+  ].join('\n');
+}

@@ -6,7 +6,7 @@ import {randomUUID} from 'node:crypto';
 import {normalize, parse, resultKey} from './parser.mjs';
 import {findReservation, reservationNotice} from './reservation.mjs';
 import {suggestAlias, senderOf, confirmationAnswer} from './aliases.mjs';
-import {connectStorage, MongoState, MongoSessionStore, acquireLease, serializeAsync} from './mongo-store.mjs';
+import {connectStorage, MongoState, MongoSessionStore, acquireLease, serializeAsync, leaseNotice} from './mongo-store.mjs';
 
 const {Client, RemoteAuth} = WhatsApp;
 const base = process.env.API_BASE_URL?.replace(/\/$/, '');
@@ -21,7 +21,12 @@ let storage;
 try {storage=await connectStorage(process.env.MONGODB_URI,process.env.MONGODB_DATABASE || 'Tennis');}
 catch(error) {console.error('No se pudo conectar MongoDB:',error.name,'código:',error.code || 'sin código');process.exit(1);}
 const owner=randomUUID();
-if(!await acquireLease(storage.sessions,owner)) {await storage.connection.close();throw new Error('Otra instancia del bot ya está activa');}
+if(!await acquireLease(storage.sessions,owner)) {
+  const lock=await storage.sessions.findOne({_id:'lock:tennis-results'},{projection:{expiresAt:1}});
+  console.error(leaseNotice(lock?.expiresAt));
+  await storage.connection.close();
+  process.exit(1);
+}
 const state=new MongoState(storage);
 let journal;
 try { journal = JSON.parse(await readFile('state/messages.json', 'utf8')); }

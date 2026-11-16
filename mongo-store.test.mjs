@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {MongoSessionStore,MongoState,acquireLease,serializeAsync} from './mongo-store.mjs';
+import {MongoSessionStore,MongoState,acquireLease,serializeAsync,leaseNotice} from './mongo-store.mjs';
 
 const matches=(doc,query)=>Object.entries(query).every(([key,value])=>value && value.$ne!==undefined ? doc[key]!==value.$ne : doc[key]===value);
 function collection() {
@@ -81,4 +81,14 @@ test('usa caché solo si coincide con el respaldo verificado en MongoDB',async()
   await store.extract({session,path:join(dir,'out.zip')});
   assert.equal((await readFile(join(dir,'out.zip'))).toString(),'session válida');
  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('explica el bloqueo y su espera sin afirmar que otro bot está activo',()=>{
+  const text=leaseNotice(new Date(90500),1000);
+  assert.match(text,/90 segundos si no se renueva/);
+  assert.match(text,/instancia anterior/);
+  assert.match(text,/Ctrl\+C/);
+  assert.doesNotMatch(text,/Otra instancia del bot ya está activa/);
+  assert.match(leaseNotice(new Date(0),1000),/pudo vencer/);
+  assert.match(leaseNotice(undefined,1000),/vuelve a intentar/);
 });
