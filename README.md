@@ -54,7 +54,7 @@ Los alias y las consultas pendientes se conservan en MongoDB tras reinicios. Con
 
 ## Ejecución local
 
-Requisitos: Node.js 22, acceso a MongoDB y al backend, y Chrome compatible con Puppeteer. El bot no escucha un puerto HTTP propio; realiza conexiones salientes. El backend local de ejemplo escucha en el puerto 3500.
+Requisitos: Node.js 26 LTS (seleccionar con `nvm use` si usas nvm), acceso a MongoDB y al backend, y Chrome compatible con Puppeteer. El bot no escucha un puerto HTTP propio; realiza conexiones salientes. El backend local de ejemplo escucha en el puerto 3500.
 
 ```sh
 npm ci

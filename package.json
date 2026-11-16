@@ -15,6 +15,6 @@
   },
   "description": "Bot de resultados de tenis para WhatsApp y Tennis App",
   "engines": {
-    "node": "22.x"
+    "node": "26.x"
   }
 }
