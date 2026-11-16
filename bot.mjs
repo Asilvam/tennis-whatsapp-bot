@@ -6,7 +6,7 @@ import {randomUUID} from 'node:crypto';
 import {normalize, parse, resultKey} from './parser.mjs';
 import {findReservation, reservationNotice} from './reservation.mjs';
 import {suggestAlias, senderOf, confirmationAnswer} from './aliases.mjs';
-import {findDuplicate, confirmedDuplicateNotice} from './duplicates.mjs';
+import {findDuplicate, duplicateNotice} from './duplicates.mjs';
 import {connectStorage, MongoState, MongoSessionStore, acquireLease, serializeAsync, leaseNotice} from './mongo-store.mjs';
 
 const {Client, RemoteAuth} = WhatsApp;
@@ -204,12 +204,10 @@ async function processMessage(message, resume = false) {
     if (duplicate) {
       journal[id] = {...journal[id],status:'duplicate',resultKey:key,duplicateOf:duplicate.id};
       await save();
-      console.log('Resultado repetido ignorado:', id);
-      if (resume) {
-        journal[id].acknowledgement='sending';await save();
-        await message.reply(confirmedDuplicateNotice(duplicate.entry));
-        journal[id].acknowledgement='sent';await save();
-      }
+      journal[id].acknowledgement='sending';await save();
+      await message.reply(duplicateNotice(duplicate.entry,resume));
+      journal[id].acknowledgement='sent';await save();
+      console.log('Resultado repetido: aviso enviado sin reingresar ni modificar puntos:', id);
       return;
     }
     const receipt=journal[id]?.receipt;

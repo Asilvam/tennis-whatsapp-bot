@@ -15,7 +15,7 @@ Bot independiente que lee resultados de tenis en un grupo de WhatsApp y consulta
 - En modo de registro real, los mensajes anteriores al arranque no se procesan automáticamente.
 - Solo después de una respuesta exitosa del backend confirma “✅ Resultado ya ingresado”.
 - En modo prueba no envía el POST y avisa que no se modificaron puntos.
-- Ignora reenvíos con los mismos jugadores, marcador y fecha, incluso con cambios de separadores o nombres abreviados. Los reenvíos normales se ignoran sin responder. Si el duplicado se detecta al retomar un resultado después de confirmar un nombre, el bot sí responde: confirma el nombre e informa el estado anterior (ingresado, rechazo con motivo o pendiente de revisión), sin volver a enviar el resultado al backend.
+- Ignora reenvíos con los mismos jugadores, marcador y fecha, incluso con cambios de separadores o nombres abreviados. Todo reenvío recibe un aviso de resultado repetido con su estado anterior: ingresado, rechazo con motivo o pendiente de revisión. Si se retoma después de confirmar un nombre, también confirma la identidad. Nunca vuelve a enviar un duplicado al backend ni vuelve a modificar puntos.
 
 El cálculo de puntos pertenece al backend. El bot no confirma la aceptación del resultado por parte del rival. La antigüedad se calcula desde la fecha de la reserva hasta el día de validación en `America/Santiago`: se admiten hoy, ayer y anteayer, y se rechazan fechas futuras. Si hay más de una reserva válida dentro de ese período, se requiere revisión manual. El texto no puede alterar la fecha de la reserva.
 

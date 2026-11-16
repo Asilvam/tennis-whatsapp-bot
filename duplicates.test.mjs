@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {findDuplicate,confirmedDuplicateNotice} from './duplicates.mjs';
+import {findDuplicate,confirmedDuplicateNotice,duplicateNotice} from './duplicates.mjs';
 
 test('elige el resultado revisado y no otro reenvío ni el mensaje actual',()=>{
  const prior={status:'pending',resultKey:'same',reasonCode:'TOO_OLD'};
@@ -19,4 +19,11 @@ test('distingue registro confirmado, simulación e intento incierto',()=>{
  assert.match(confirmedDuplicateNotice({status:'sent'}),/ya fue ingresado/);
  assert.match(confirmedDuplicateNotice({status:'preview'}),/no fue ingresado ni modificó puntos/);
  assert.match(confirmedDuplicateNotice({status:'uncertain'}),/requiere revisión/);
+});
+
+test('un reenvío normal también recibe un aviso claro sin afirmar nombre confirmado',()=>{
+ const text=duplicateNotice({status:'pending',reasonCode:'TOO_OLD'});
+ assert.match(text,/Resultado repetido/);assert.match(text,/más de dos días/);
+ assert.doesNotMatch(text,/Nombre confirmado/);
+ assert.match(duplicateNotice({status:'sent'}),/No se volverán a modificar los puntos/);
 });
