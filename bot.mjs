@@ -7,6 +7,9 @@ import {normalize, parse, resultKey, activePlayers} from './parser.mjs';
 import {findReservation, reservationNotice} from './reservation.mjs';
 import {suggestAlias, senderOf, confirmationAnswer} from './aliases.mjs';
 import {findDuplicate, duplicateNotice} from './duplicates.mjs';
+import {recoverableMessage} from './message-recovery.mjs';
+import {logEvent} from './logger.mjs';
+const logError=error=>logEvent('ERROR','PROCESAMIENTO',error.message || String(error));
 import {connectStorage, MongoState, MongoSessionStore, acquireLease, serializeAsync, leaseNotice} from './mongo-store.mjs';
 
 const {Client, RemoteAuth} = WhatsApp;
@@ -20,11 +23,11 @@ const messageDate = message => new Intl.DateTimeFormat('en-CA', {timeZone:'Ameri
 await mkdir('state', {recursive:true});
 let storage;
 try {storage=await connectStorage(process.env.MONGODB_URI,process.env.MONGODB_DATABASE || 'Tennis');}
-catch(error) {console.error('No se pudo conectar MongoDB:',error.name,'código:',error.code || 'sin código');process.exit(1);}
+catch(error) {logEvent('ERROR','MONGODB',`No se pudo conectar: ${error.name}; código ${error.code || 'sin código'}`);process.exit(1);}
 const owner=randomUUID();
 if(!await acquireLease(storage.sessions,owner)) {
   const lock=await storage.sessions.findOne({_id:'lock:tennis-results'},{projection:{expiresAt:1}});
-  console.error(leaseNotice(lock?.expiresAt));
+  logEvent('AVISO','INICIO_BLOQUEADO',leaseNotice(lock?.expiresAt));
   await storage.connection.close();
   process.exit(1);
 }
@@ -36,7 +39,7 @@ let aliases;
 try { aliases = JSON.parse(await readFile('state/aliases.json','utf8')); }
 catch (e) { if (e.code !== 'ENOENT') throw e; aliases = {}; }
 ({journal,aliases}=await state.load(journal,aliases));
-console.log(`Persistencia MongoDB activa: ${storage.connection.name}; ${Object.keys(journal).length} mensajes recuperados.`);
+logEvent('INFO','MONGODB',`Conectado a ${storage.connection.name}; ${Object.keys(journal).length} mensajes recuperados.`);
 async function saveAliases() {
   await state.saveAliases(aliases);
 }
@@ -63,11 +66,14 @@ const client = new Client({
   },
 });
 let stopping=false;
+let botReady=false;
+let recovering=false;
 async function shutdown(code=0) {
   if(stopping)return;stopping=true;
+  logEvent('INFO','CIERRE','Deteniendo el bot y cerrando WhatsApp.');
   clearInterval(heartbeat);
   const forceExit=setTimeout(()=>{
-    console.error('El cierre tardó más de 8 segundos; se detendrá el proceso. El bloqueo vencerá solo.');
+    logEvent('AVISO','CIERRE_FORZADO','El cierre superó 8 segundos. El bloqueo vencerá automáticamente.');
     try {client.pupBrowser?.process()?.kill('SIGKILL');} catch {}
     process.exit(code);
   },8000);
@@ -76,12 +82,12 @@ async function shutdown(code=0) {
   await storage.connection.close();clearTimeout(forceExit);process.exit(code);
 }
 const heartbeat=setInterval(async()=>{
-  try {if(!await acquireLease(storage.sessions,owner)) {console.error('Otra instancia tiene el control; deteniendo bot.');await shutdown(1);}}
-  catch {console.error('Se perdió la conexión a MongoDB; deteniendo bot.');await shutdown(1);}
+  try {if(!await acquireLease(storage.sessions,owner)) {logEvent('ERROR','BLOQUEO_PERDIDO','Otra instancia tiene el control; deteniendo bot.');await shutdown(1);}}
+  catch {logEvent('ERROR','MONGODB','Se perdió la conexión; deteniendo bot.');await shutdown(1);}
 },10000);
 process.on('SIGTERM',()=>shutdown());
 process.on('SIGINT',()=>shutdown());
-client.on('remote_session_saved',()=>console.log('Sesión de WhatsApp guardada en MongoDB.'));
+client.on('remote_session_saved',()=>logEvent('DEBUG','RESPALDO','Sesión de WhatsApp guardada en MongoDB.'));
 client.on('qr', value => qr.generate(value, {small:true}));
 async function acknowledge(message) {
   const entry = journal[message.id._serialized];
@@ -100,47 +106,49 @@ async function acknowledge(message) {
     await message.reply(`[Bot escalerilla] ${text}`);
     entry.acknowledgement = 'sent';
     await save();
-    console.log('Confirmación enviada:', message.id._serialized);
+    logEvent('INFO','AVISO_ENVIADO',`Respuesta de WhatsApp enviada; estado: ${entry.status}.`,{messageId:message.id._serialized});
   } catch (error) {
     entry.acknowledgement = 'uncertain';
     await save();
-    console.error('No se pudo confirmar el envío del aviso:', error.message);
+    logEvent('ERROR','AVISO_NO_CONFIRMADO',error.message,{messageId:message.id._serialized});
   }
 }
 async function resolveGroup() {
   if (groupId) return;
   const groups = (await client.getChats()).filter(chat => chat.isGroup);
   if (!groupName) {
-    for (const chat of groups) console.log(chat.name, chat.id._serialized);
+    for (const chat of groups) logEvent('INFO','GRUPO_DISPONIBLE',`${chat.name}: ${chat.id._serialized}`);
     return;
   }
   const matches = groups.filter(chat => normalize(chat.name) === normalize(groupName));
   if (matches.length !== 1) {
-    console.log(`Grupo pendiente: ${groupName}. Coincidencias: ${matches.length}`);
+    logEvent('AVISO','GRUPO_PENDIENTE',`${groupName}; coincidencias: ${matches.length}`);
     return;
   }
   groupId = matches[0].id._serialized;
   await writeFile('state/group.json', JSON.stringify({name:matches[0].name,id:groupId}), {mode:0o600});
-  console.log('Grupo seleccionado:', matches[0].name, groupId);
+  logEvent('INFO','GRUPO',`Seleccionado: ${matches[0].name}`);
 }
 client.on('ready', async () => {
-  console.log(`Bot conectado. Modo prueba: ${dry}`);
+  logEvent('INFO','WHATSAPP',`Conectado. Modo: ${dry ? 'SIMULACIÓN, no modifica puntos' : 'REGISTRO REAL, modifica puntos'}.`);
   await resolveGroup();
   // Incorporar los resultados ya revisados antes de activar esta regla.
   if (groupId) {
     const missing = Object.entries(journal).filter(([,entry]) => !entry.resultKey);
     if (missing.length) {
       const roster = activePlayers(await api('/register'));
+      let indexed=0,skipped=0;
       for (const [id, entry] of missing) {
         try {
           const message = await client.getMessageById(id);
           if (!message || (message.fromMe ? message.to : message.from) !== groupId) continue;
           const parsed = parse(message.body, roster, aliases[groupId] || {});
           const date = Number.isFinite(message.timestamp) ? messageDate(message) : entry.reason?.match(/\d{4}-\d{2}-\d{2}/)?.[0];
-          if (parsed && date) entry.resultKey = resultKey(parsed, groupId, date);
-        } catch (error) { console.error('No se pudo indexar un resultado anterior:', error.message); }
+          if (parsed && date) {entry.resultKey = resultKey(parsed, groupId, date);indexed++;}
+        } catch (error) {skipped++;logEvent('DEBUG','HISTORIAL_OMITIDO',error.message,{messageId:id});}
       }
       await save();
+      logEvent('INFO','HISTORIAL',`${indexed} mensajes anteriores indexados; ${skipped} omitidos por nombres o formato. No son resultados nuevos. Detalles: LOG_LEVEL=debug.`);
     }
   }
   if (groupId && process.env.ACK_MESSAGE_ID) {
@@ -151,12 +159,29 @@ client.on('ready', async () => {
     const chat = await client.getChatById(groupId);
     for (const message of await chat.fetchMessages({limit:3})) {
       if (message.timestamp < Date.now()/1000 - 1800) continue;
-      console.log('Revisando mensaje reciente:', message.body);
+      logEvent('DEBUG','REVISION_RECIENTE','Revisando mensaje de prueba.',{messageId:message.id._serialized});
       await processMessage(message);
     }
   }
 });
-setInterval(() => { if (!groupId) resolveGroup().catch(console.error); }, 20000);
+client.on('ready',()=>{botReady=true;recoverRecentMessages().catch(logError);});
+client.on('disconnected',()=>{botReady=false;});
+async function recoverRecentMessages() {
+  if(!botReady || !groupId || stopping || recovering)return;
+  recovering=true;
+  try {
+    const chat=await client.getChatById(groupId);
+    const recent=await chat.fetchMessages({limit:30});
+    for(const message of recent) {
+      if(!recoverableMessage(message,startedAt,journal))continue;
+      logEvent('INFO','MENSAJE_RECUPERADO','Mensaje reciente pendiente; encolado para revisión.',{messageId:message.id._serialized});
+      queue=queue.then(()=>processMessage(message)).catch(logError);
+    }
+    await queue;
+  } finally {recovering=false;}
+}
+setInterval(()=>recoverRecentMessages().catch(error=>logEvent('ERROR','RECUPERACION',error.message)),15000);
+setInterval(() => { if (!groupId) resolveGroup().catch(logError); }, 20000);
 let queue = Promise.resolve();
 async function processMessage(message, resume = false) {
   if(stopping)return;
@@ -213,9 +238,10 @@ async function processMessage(message, resume = false) {
       journal[id].acknowledgement='sending';await save();
       await message.reply(duplicateNotice(duplicate.entry,resume));
       journal[id].acknowledgement='sent';await save();
-      console.log('Resultado repetido: aviso enviado sin reingresar ni modificar puntos:', id);
+      logEvent('INFO','DUPLICADO','Aviso enviado. No se reingresó ni se modificaron puntos.',{messageId:id});
       return;
     }
+    logEvent('INFO','RESULTADO_RECIBIDO','Validando jugadores, marcador y reserva.',{messageId:id,...(parsed?{players:parsed.winner.map(p=>p.namePlayer).join(' / ')+' vs '+parsed.looser.map(p=>p.namePlayer).join(' / '),score:parsed.result}:{})});
     const receipt=journal[id]?.receipt;
     journal[id] = {
       status:'received',receipt:receipt || 'sending',resultKey:key,groupId,messageDate:date,
@@ -228,7 +254,7 @@ async function processMessage(message, resume = false) {
       journal[id].receipt = 'sent';
     } catch (error) {
       journal[id].receipt = 'uncertain';
-      console.error('No se pudo confirmar el envío del recibido:', error.message);
+      logEvent('ERROR','RECIBIDO_NO_CONFIRMADO',error.message,{messageId:id});
     }
     await save();
     }
@@ -237,6 +263,7 @@ async function processMessage(message, resume = false) {
       journal[id]={...journal[id],status:'needs_confirmation',groupId,sender:senderOf(message),suggestion,originalBody:message.body,originalTimestamp:message.timestamp,expiresAt:Date.now()+24*60*60*1000};
       await save();
       const question=await message.reply(`[Bot escalerilla] ¿Con “${suggestion.label}” te refieres a “${suggestion.name}”? Quien envió el resultado debe responder “sí” o “no” citando esta pregunta. El resultado queda pendiente; aún no se ha ingresado.`);
+      logEvent('AVISO','IDENTIDAD_PENDIENTE',`Se consultó si ${suggestion.label} corresponde a ${suggestion.name}; esperando respuesta del autor.`,{messageId:id});
       journal[id].questionId=question.id._serialized;
       await save();
       return;
@@ -260,7 +287,7 @@ async function processMessage(message, resume = false) {
     }
     const payload = {matchId:reserve.idCourtReserve,result:parsed.result,winner:await Promise.all(parsed.winner.map(player)),looser:await Promise.all(parsed.looser.map(player))};
     if (dry) {
-      console.log('PREVISTA', JSON.stringify(payload));
+      logEvent('INFO','SIMULACION','Validación correcta; no se ingresó ni se modificaron puntos.',{messageId:id,players:payload.winner.map(p=>p.name).join(' / ')+' vs '+payload.looser.map(p=>p.name).join(' / '),score:payload.result,reservation:payload.matchId});
       journal[id] = {...journal[id],status:'preview',matchId:payload.matchId};
       await save();
       await acknowledge(message);
@@ -272,19 +299,19 @@ async function processMessage(message, resume = false) {
     await api('/match-ranking', payload);
     journal[id].status = 'sent';
     await save();
-    console.log('Registrado', payload.matchId);
+    logEvent('INFO','RESULTADO_INGRESADO','Backend confirmó el registro y la actualización de puntos.',{messageId:id,score:payload.result,reservation:payload.matchId});
     await acknowledge(message);
   } catch (error) {
     journal[id] = {...journal[id],status:posting ? 'uncertain' : 'pending',reason:error.message,reasonCode:error.code};
     await save();
-    console.error('Revisión manual:', id, error.message);
+    logEvent(posting?'ERROR':'AVISO',posting?'REGISTRO_INCIERTO':reservationNotice(error.code)?'RESULTADO_RECHAZADO':'REQUIERE_REVISION',error.message,{messageId:id,reservation:journal[id].matchId});
     await acknowledge(message);
   }
 }
-client.on('message', message => { queue = queue.then(() => processMessage(message)).catch(console.error); });
+client.on('message', message => { queue = queue.then(() => processMessage(message)).catch(logError); });
 client.on('message_create', message => {
-  if (message.fromMe) queue = queue.then(() => processMessage(message)).catch(console.error);
+  if (message.fromMe) queue = queue.then(() => processMessage(message)).catch(logError);
 });
-client.on('auth_failure', () => console.error('Falló la vinculación de WhatsApp'));
-client.on('disconnected', reason => console.error('WhatsApp desconectado:', reason));
+client.on('auth_failure', () => logEvent('ERROR','AUTENTICACION','Falló la vinculación de WhatsApp.'));
+client.on('disconnected', reason => logEvent('AVISO','WHATSAPP_DESCONECTADO',reason));
 await client.initialize();

@@ -13,7 +13,7 @@ Bot independiente que lee resultados de tenis en un grupo de WhatsApp y consulta
 - Exige una única reserva de ranking activa y pendiente, para los mismos participantes y con una antigüedad máxima de dos días calendario en Chile.
 - Responde primero “📩 Resultado recibido. Validando…”.
 - Si no encuentra una reserva, responde: “⚠️ No se encontró un partido agendado para esos jugadores dentro de los dos días permitidos. Este resultado no será considerado.”
-- En modo de registro real, los mensajes anteriores al arranque no se procesan automáticamente.
+- Los mensajes anteriores al arranque no se recuperan automáticamente. Mientras está conectado, el bot revisa cada 15 segundos los últimos 30 mensajes y encola los resultados o confirmaciones posteriores al arranque que no estén en el diario, para recuperar eventos perdidos. La comprobación por ID impide reprocesar un mensaje que ya llegó por el evento normal.
 - Solo después de una respuesta exitosa del backend confirma “✅ Resultado ya ingresado”.
 - En modo prueba no envía el POST y avisa que no se modificaron puntos.
 - Ignora reenvíos con los mismos jugadores, marcador y fecha, incluso con cambios de separadores o nombres abreviados. Todo reenvío recibe un aviso de resultado repetido con su estado anterior: ingresado, rechazo con motivo o pendiente de revisión. Si se retoma después de confirmar un nombre, también confirma la identidad. Nunca vuelve a enviar un duplicado al backend ni vuelve a modificar puntos.
@@ -130,3 +130,30 @@ No subir `.env` ni sesión de WhatsApp a GitHub. El disco de Heroku es efímero:
 Referencias: [dynos de Heroku](https://devcenter.heroku.com/articles/dynos), [almacenamiento efímero](https://help.heroku.com/K1PPS2WM/why-are-my-file-uploads-missing-deleted-from-the-application), [whatsapp-web.js](https://wwebjs.dev/).
 
 La conexión mediante WhatsApp Web no es oficial y puede desconectarse o sufrir bloqueos. Esta versión no incluye licencia para redistribución; el repositorio no añade una licencia automáticamente.
+
+## Logs de operación
+
+Los logs incluyen fecha y hora de Chile, nivel (`INFO`, `AVISO`, `ERROR` o `DEBUG`), evento y una referencia breve estable por mensaje. No imprimen el ID completo del participante ni los correos o la URI de MongoDB. La simulación muestra jugadores y marcador, sin volcar el payload con datos de contacto.
+
+`RESULTADO_RECIBIDO` indica inicio de validación; `RESULTADO_RECHAZADO` muestra el motivo; `AVISO_ENVIADO` solo confirma que se envió una respuesta a WhatsApp, no que se ingresó el resultado. `RESULTADO_INGRESADO` se reserva para una respuesta exitosa del backend. `REGISTRO_INCIERTO` exige revisión antes de reintentar.
+
+Al arrancar, los problemas al indexar mensajes históricos se agrupan en un resumen `HISTORIAL`, sin presentarlos como rechazos de mensajes nuevos. Usar `LOG_LEVEL=debug` para ver los motivos individuales y los respaldos periódicos. El nivel predeterminado es `info`.
+
+## Reiniciar el historial del bot
+
+Para empezar de cero el procesamiento y la detección de duplicados, primero detener el bot con **Ctrl+C**. El script se niega a borrar si otro bot mantiene el bloqueo activo.
+
+```sh
+# Ver cantidad de registros sin borrar nada:
+npm run history:reset
+
+# Respaldar y limpiar el historial:
+npm run history:reset -- --apply
+
+# Iniciar nuevamente:
+npm start
+```
+
+Solo se vacía `bot_results` y el diario local `state/messages.json`. El respaldo previo se guarda en `state/backups/` (excluido de Git). No se eliminan la sesión de WhatsApp, los alias ni los mensajes del grupo. No se modifican reservas, resultados del backend ni puntos.
+
+Al reiniciar, enviar un mensaje nuevo: el bot no procesa mensajes anteriores al arranque automáticamente. Limpiar el historial permite volver a validar resultados antes revisados; el backend todavía debe impedir ingresar una reserva que ya tenga resultado. Este reinicio no garantiza corregir un fallo de conexión o de envío: esos estados se revisan por separado.

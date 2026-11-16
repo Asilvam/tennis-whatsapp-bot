@@ -5,8 +5,9 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env bot.mjs",
     "test": "node --test",
-    "check": "node --check bot.mjs && node --check parser.mjs && node --check mongo-store.mjs && node --check migrate-local.mjs",
-    "migrate:local": "node --env-file-if-exists=.env migrate-local.mjs"
+    "check": "node --check bot.mjs && node --check parser.mjs && node --check mongo-store.mjs && node --check migrate-local.mjs && node --check reset-history.mjs",
+    "migrate:local": "node --env-file-if-exists=.env migrate-local.mjs",
+    "history:reset": "node --env-file-if-exists=.env reset-history.mjs"
   },
   "dependencies": {
     "mongoose": "^8.24.9",
