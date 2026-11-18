@@ -9,6 +9,7 @@ import {suggestAlias, senderOf, confirmationAnswer} from './aliases.mjs';
 import {findDuplicate, duplicateNotice} from './duplicates.mjs';
 import {recoverableMessage} from './message-recovery.mjs';
 import {logEvent} from './logger.mjs';
+import {browserOptions,authenticationTimeout} from './browser-config.mjs';
 const logError=error=>logEvent('ERROR','PROCESAMIENTO',error.message || String(error));
 import {connectStorage, MongoState, MongoSessionStore, acquireLease, serializeAsync, leaseNotice} from './mongo-store.mjs';
 
@@ -17,6 +18,7 @@ const base = process.env.API_BASE_URL?.replace(/\/$/, '');
 if (!base) throw new Error('Falta API_BASE_URL');
 const dry = process.env.DRY_RUN !== 'false';
 const startedAt = Math.floor(Date.now()/1000);
+const authTimeoutMs=authenticationTimeout();
 let groupId = process.env.WHATSAPP_GROUP_ID;
 const groupName = process.env.WHATSAPP_GROUP_NAME;
 const messageDate = message => new Intl.DateTimeFormat('en-CA', {timeZone:'America/Santiago', year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(message.timestamp * 1000));
@@ -60,10 +62,8 @@ const auth=new RemoteAuth({clientId:'tennis-results',store:new MongoSessionStore
 auth.storeRemoteSession=serializeAsync(auth.storeRemoteSession.bind(auth));
 const client = new Client({
   authStrategy:auth,
-  puppeteer: {
-    headless: process.env.WHATSAPP_HEADLESS !== 'false',
-    ...(process.env.CHROME_PATH ? {executablePath:process.env.CHROME_PATH} : {}),
-  },
+  authTimeoutMs,
+  puppeteer: browserOptions(),
 });
 let stopping=false;
 let botReady=false;
@@ -314,4 +314,13 @@ client.on('message_create', message => {
 });
 client.on('auth_failure', () => logEvent('ERROR','AUTENTICACION','Falló la vinculación de WhatsApp.'));
 client.on('disconnected', reason => logEvent('AVISO','WHATSAPP_DESCONECTADO',reason));
-await client.initialize();
+logEvent('INFO','WHATSAPP_INICIANDO',`Restaurando sesión y cargando WhatsApp Web. Tiempo máximo de autenticación: ${authTimeoutMs/1000} segundos.`);
+try {
+  await client.initialize();
+} catch(error) {
+  const timeout=error?.name==='TimeoutError'||String(error).includes('auth timeout');
+  logEvent('ERROR',timeout?'WHATSAPP_INICIO_TIMEOUT':'WHATSAPP_INICIO_FALLIDO',timeout
+    ? `WhatsApp Web no terminó de cargar en ${authTimeoutMs/1000} segundos. Se cerrará Chrome y se liberará el bloqueo. La sesión guardada no se borrará; revisa la conexión y vuelve a iniciar.`
+    : `No se pudo iniciar WhatsApp: ${error?.message || String(error)}. Cerrando y liberando el bloqueo.`);
+  await shutdown(1);
+}

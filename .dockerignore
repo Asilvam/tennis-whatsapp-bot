@@ -1,0 +1,8 @@
+# Contexto de build limitado: no enviar secretos, sesiones ni historial.
+**
+!Dockerfile
+!package.json
+!package-lock.json
+!*.mjs
+!scripts/
+!scripts/docker-smoke.mjs

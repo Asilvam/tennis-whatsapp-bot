@@ -157,3 +157,50 @@ npm start
 Solo se vacía `bot_results` y el diario local `state/messages.json`. El respaldo previo se guarda en `state/backups/` (excluido de Git). No se eliminan la sesión de WhatsApp, los alias ni los mensajes del grupo. No se modifican reservas, resultados del backend ni puntos.
 
 Al reiniciar, enviar un mensaje nuevo: el bot no procesa mensajes anteriores al arranque automáticamente. Limpiar el historial permite volver a validar resultados antes revisados; el backend todavía debe impedir ingresar una reserva que ya tenga resultado. Este reinicio no garantiza corregir un fallo de conexión o de envío: esos estados se revisan por separado.
+
+## Docker Compose para uso local
+
+Incluye Node 26 y Chromium para Linux. Usa el `.env` local únicamente al ejecutar el contenedor; no lo incorpora a la imagen. No expone puertos: el bot realiza conexiones salientes.
+
+```sh
+# Validar configuración sin imprimir secretos:
+docker compose config --quiet
+
+# Construir:
+docker compose build
+
+# Probar Chromium, backend y MongoDB sin iniciar WhatsApp ni escribir datos:
+docker compose run --rm --no-deps bot node scripts/docker-smoke.mjs
+```
+
+Para ejecutar el bot, detener primero cualquier instancia nativa con Ctrl+C y esperar a que libere el bloqueo. Después:
+
+```sh
+# Ejecutar en primer plano y ver logs (Ctrl+C para detener):
+docker compose up
+
+# O ejecutar en segundo plano:
+docker compose up -d
+docker compose logs -f bot
+
+# Detener y retirar el contenedor, conservando los volúmenes:
+docker compose down
+```
+
+Compose usa `http://host.docker.internal:3500` para el backend de tu Mac, en lugar del `localhost` del contenedor. Se puede cambiar con `DOCKER_API_BASE_URL`. Docker Desktop debe estar iniciado y el backend debe aceptar conexiones desde Docker.
+
+**El contenedor comienza en modo prueba (`DRY_RUN=true`) aunque el `.env` nativo tenga `false`.** Para habilitar registros reales explícitamente:
+
+```sh
+DOCKER_DRY_RUN=false docker compose up -d --force-recreate
+```
+
+Los volúmenes `bot_state`, `bot_auth` y `bot_cache` conservan archivos de trabajo, respaldos del reset y la caché de sesión entre reinicios; MongoDB conserva el estado principal. No usar `docker compose down -v` si se quieren conservar los volúmenes. La imagen no incluye la sesión de tu Mac: el primer arranque restaura la copia remota y puede requerir nueva vinculación por QR. No ejecutar dos instancias sobre la misma sesión.
+
+El navegador corre como usuario `node`. Solo dentro de esta configuración Docker se desactiva su sandbox para permitir Chromium en el contenedor; la configuración nativa conserva su comportamiento. Los logs Docker rotan hasta tres archivos de 10 MB y el cierre tiene 12 segundos de gracia para completar el apagado del bot.
+
+## Timeout al iniciar WhatsApp
+
+El arranque permite por defecto 30 segundos para cargar y autenticar WhatsApp Web (`WHATSAPP_AUTH_TIMEOUT_MS=30000`, configurable entre 30 y 300 segundos). Un timeout indica que el lector no terminó de iniciar; no significa que MongoDB falló ni que se perdió la sesión.
+
+Si la inicialización falla, se informa `WHATSAPP_INICIO_TIMEOUT` o `WHATSAPP_INICIO_FALLIDO`, se cierra Chrome y se intenta liberar el bloqueo. No se elimina la sesión remota ni se reinicia el historial. Revisar conexión a Internet y la ventana de WhatsApp, luego ejecutar `npm start` de nuevo. El valor configurado también se aplica en Docker al reconstruir la imagen.
